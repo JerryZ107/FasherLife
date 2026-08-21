@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <title>钓鱼佬日常 · Demo</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      (function () {
+        var box = document.createElement("div");
+        box.id = "err-box";
+        box.style.cssText =
+          "position:fixed;top:0;left:0;right:0;max-height:50vh;overflow:auto;z-index:9999;" +
+          "background:#1a0f14;color:#ef476f;padding:12px;font-family:monospace;white-space:pre-wrap;display:none";
+        document.body.appendChild(box);
+        function show(msg) {
+          box.style.display = "block";
+          box.textContent += msg + "\n\n";
+        }
+        window.addEventListener("error", function (e) {
+          show("ERROR: " + (e.message || "") + "\n" + (e.error && e.error.stack ? e.error.stack : ""));
+        });
+        window.addEventListener("unhandledrejection", function (e) {
+          show("PROMISE: " + (e.reason && e.reason.stack ? e.reason.stack : e.reason));
+        });
+      })();
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
