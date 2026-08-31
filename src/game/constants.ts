@@ -1,5 +1,3 @@
-import type { Quality } from "../types";
-
 /** 已废弃：结算不再用间隔，改用北京自然日（见 `beijingCalendarDaysPassed`）。 */
 export const DEFAULT_REAL_MS_PER_GAME_DAY = 86_400_000;
 
@@ -9,16 +7,10 @@ export const IDLE_MS_PER_CAST = 10_000;
 /** 珍珠→金币商店汇率（ADR-001）。 */
 export const PEARL_TO_GOLD = 100;
 
-/** 托管日费：普通免费，其余按品质（ADR-001 玩法设定）。 */
-export const HOSTING_FEE: Record<Quality, number> = {
-  common: 0,
-  fine: 10,
-  rare: 50,
-  precious: 150,
-  ultimate: 600,
-};
+/** 托管日费：每口缸 100 金/天。 */
+export const HOSTING_FEE_PER_TANK = 100;
 
-/** 月卡：30 珍珠，每日 300 金币，持续 30 游戏天。 */
+/** 月卡：30 珍珠，每日 300 金币，持续 30 游戏天；可叠买。 */
 export const MONTHLY_CARD_PEARL = 30;
 export const MONTHLY_CARD_DAILY_GOLD = 300;
 export const MONTHLY_CARD_DAYS = 30;

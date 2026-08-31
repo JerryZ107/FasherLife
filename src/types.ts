@@ -34,6 +34,13 @@ export const SEX_LABEL: Record<Sex, string> = { male: "公", female: "母" };
 /** 互斥性格（ADR-018）。 */
 export type Personality = "hot" | "docile" | "timid" | "aloof";
 export const PERSONALITIES: Personality[] = ["hot", "docile", "timid", "aloof"];
+/** 生成实例时加权（ADR-018）：温顺 35 / 暴躁 25 / 高冷 25 / 胆小 15。 */
+export const PERSONALITY_WEIGHT: Record<Personality, number> = {
+  docile: 35,
+  hot: 25,
+  aloof: 25,
+  timid: 15,
+};
 export const PERSONALITY_LABEL: Record<Personality, string> = {
   hot: "暴躁",
   docile: "温顺",
@@ -57,21 +64,19 @@ export const LOVE_VIEW_LABEL: Record<LoveView, string> = {
   none: "拒绝配对",
 };
 
-export type RodPartSlot = "handle" | "reel" | "line" | "hook" | "float";
-export const ROD_PART_SLOTS: RodPartSlot[] = ["handle", "reel", "line", "hook", "float"];
+export type RodPartSlot = "reel" | "line" | "hook" | "float";
+export const ROD_PART_SLOTS: RodPartSlot[] = ["reel", "line", "hook", "float"];
 export const ROD_PART_LABEL: Record<RodPartSlot, string> = {
-  handle: "手杆",
   reel: "渔线轮",
   line: "鱼线",
   hook: "鱼钩",
   float: "浮漂",
 };
 export const ROD_PART_DESC: Record<RodPartSlot, string> = {
-  handle: "对其余四件系数增幅",
-  reel: "玩家滑块灵敏度",
-  line: "进度上升/下降速度",
-  hook: "鱼的滑块大小",
-  float: "上钩可反应时间",
+  reel: "灵敏度",
+  line: "进度",
+  hook: "鱼滑块",
+  float: "咬钩窗口",
 };
 
 /** 鱼定义（静态数据）。 */
@@ -113,11 +118,17 @@ export interface ConsumableDef {
   baitPrice: number;
   /** 鱼食单价（金）= 鱼饵 ÷ 2，至少 1。 */
   foodPrice: number;
+  /** 鱼饵货架简介。 */
+  baitBlurb: string;
+  /** 鱼食货架名（与鱼饵同配方、不同库存）。 */
+  foodName: string;
+  /** 鱼食货架简介。 */
+  foodBlurb: string;
   /** 商城是否可见。 */
   hiddenFromShop?: boolean;
 }
 
-/** 鱼竿五件套中的一件。stat 含义随槽位变化。 */
+/** 四件组件之一。stat 含义随槽位变化。 */
 export interface RodPartDef {
   id: string;
   slot: RodPartSlot;
@@ -125,12 +136,12 @@ export interface RodPartDef {
   quality: Quality;
   currency: "gold" | "pearl";
   price: number;
-  /** handle=系数；reel=灵敏度；line=进度倍率；hook=鱼滑块加成；float=反应窗口毫秒。 */
+  /** reel=灵敏度；line=进度倍率；hook=鱼滑块加成；float=反应窗口毫秒。 */
   stat: number;
   hiddenFromShop?: boolean;
 }
 
-/** 鱼竿整竿（购买时发放对应五件套）。 */
+/** 鱼竿即手杆（ADR-019）。购买时发放配套四件组件。 */
 export interface RodDef {
   id: string;
   name: string;
@@ -138,21 +149,10 @@ export interface RodDef {
   /** 货币：gold 或 pearl。同品质金币竿与珍珠竿数值持平（ADR-003）。 */
   currency: "gold" | "pearl";
   price: number;
-  /** 聚合装备系数，影响钓鱼小游戏各参数。 */
-  modifiers: {
-    /** 渔线轮：玩家滑块移动灵敏度。 */
-    sensitivity: number;
-    /** 鱼线：进度上升/下降速度。 */
-    progressRate: number;
-    /** 鱼钩：鱼滑块尺寸加成（降低难度）。 */
-    fishSliderBonus: number;
-    /** 浮漂：上钩反应窗口（毫秒）。 */
-    reactionWindow: number;
-    /** 手杆：对其余四件的系数增幅。 */
-    coefficient: number;
-  };
+  /** 手杆系数，乘在已装备的四件组件上。 */
+  coefficient: number;
   hiddenFromShop?: boolean;
-  /** 整竿对应的五件套 id。 */
+  /** 整竿配套的四件组件 id。 */
   kit: Record<RodPartSlot, string>;
 }
 
@@ -167,6 +167,7 @@ export interface OutfitDef {
   currency: "gold" | "pearl";
   price: number;
   look: OutfitLook;
+  blurb: string;
   /** 旧字段，潜入/地图已不再靠色相旋转换装。 */
   hue: number;
   hiddenFromShop?: boolean;
@@ -217,6 +218,7 @@ export interface TankDef {
   currency: "gold" | "pearl";
   /** 该缸可养鱼条数。 */
   capacity: number;
+  blurb: string;
   hiddenFromShop?: boolean;
 }
 
@@ -233,6 +235,7 @@ export interface AttractantDef {
   bonus: number;
   /** 持续游戏天。 */
   durationDays: number;
+  blurb: string;
 }
 
 /** 渔场定义。 */
@@ -251,7 +254,18 @@ export interface FisheryDef {
   pool: { fishId: string; weight: number }[];
 }
 
-export type QuestTrigger = "open_map" | "cast" | "catch" | "tank" | "feed" | "sell";
+export type QuestTrigger =
+  | "open_map"
+  | "cast"
+  | "catch"
+  | "tank"
+  | "feed"
+  | "sell"
+  | "read_encyc"
+  | "buy_fish"
+  | "cook"
+  | "eat"
+  | "visit";
 
 export interface QuestDef {
   id: string;

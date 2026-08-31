@@ -5,7 +5,6 @@ import { armLiftForMotion, lookOfOutfit, makePersonView, paintPerson, pixiPen } 
 import type { Sex } from "../types";
 import {
   BUSHES,
-  DROP_FROM,
   GOAL,
   START,
   TREES,
@@ -25,30 +24,69 @@ import {
 } from "./sneakLogic";
 
 const SQUASH = 0.62;
+const PAD_X = 8;
 const PAD_Y = 8;
+const CAM_LERP = 0.12;
+const CG_STAGE_MS = [650, 480, 420] as const;
 
 export type SneakPhase = "cg" | "play" | "caught" | "win";
 
 type Stick = { dx: number; dy: number; active: boolean };
 
-type Layout = { scale: number; ox: number; oy: number; camY: number };
+type Layout = { scale: number; ox: number; oy: number; camX: number; camY: number };
 
 function layoutOf(w: number, camY: number): Layout {
-  const padX = 8;
-  const scale = (w - padX * 2) / WORLD_W;
+  const scale = (w - PAD_X * 2) / WORLD_W;
   return {
     scale,
     ox: (w - WORLD_W * scale) / 2,
     oy: PAD_Y,
+    camX: 0,
     camY,
   };
 }
 
 function toScreen(lay: Layout, x: number, y: number) {
   return {
-    x: lay.ox + x * lay.scale,
+    x: lay.ox + (x - lay.camX) * lay.scale,
     y: lay.oy + (y - lay.camY) * lay.scale * SQUASH,
   };
+}
+
+function paintIntroBackdrop(g: Graphics, w: number, h: number) {
+  g.clear();
+  g.rect(0, 0, w, h);
+  g.fill({ color: 0x0c1828 });
+  for (let i = 0; i < 24; i++) {
+    const sx = hash(i + 2) * w;
+    const sy = hash(i + 9) * h * 0.22;
+    g.circle(sx, sy, 1 + hash(i + 11) * 1.2);
+    g.fill({ color: 0xfff6e8, alpha: 0.35 + hash(i + 3) * 0.45 });
+  }
+  const moonX = w * 0.82;
+  const moonY = h * 0.1;
+  g.circle(moonX, moonY, 28);
+  g.fill({ color: 0xffe08a, alpha: 0.1 });
+  g.circle(moonX, moonY, 16);
+  g.fill({ color: 0xfff4c8, alpha: 0.95 });
+  g.circle(moonX - 5, moonY - 2, 12);
+  g.fill({ color: 0x0c1828, alpha: 0.55 });
+  const groundY = h * 0.78;
+  g.rect(0, groundY, w, h - groundY);
+  g.fill({ color: 0x16384d });
+  const wallX = w * 0.42;
+  g.rect(wallX, h * 0.14, w * 0.055, h * 0.64);
+  g.fill({ color: 0x6b4a32 });
+  g.rect(wallX - w * 0.01, h * 0.13, w * 0.075, h * 0.014);
+  g.fill({ color: 0x8a6238 });
+  for (let i = 0; i < 4; i++) {
+    const bx = wallX - w * 0.01 + i * (w * 0.018);
+    g.moveTo(bx, h * 0.13);
+    g.lineTo(bx + w * 0.009, h * 0.11);
+    g.lineTo(bx + w * 0.018, h * 0.13);
+    g.closePath();
+    g.fill({ color: 0x8a6238 });
+  }
 }
 
 function hash(n: number) {
@@ -142,14 +180,20 @@ function paintGround(g: Graphics, lay: Layout) {
   const dock0 = toScreen(lay, GOAL.xMin, 8);
   const dock1 = toScreen(lay, GOAL.xMax, GOAL.y + 4);
   g.rect(dock0.x, dock0.y, dock1.x - dock0.x, dock1.y - dock0.y);
-  g.fill({ color: 0x5a3c22, alpha: 0.94 });
+  g.fill({ color: 0x6b4428, alpha: 0.96 });
   for (let i = 0; i < 6; i++) {
     const y = 9 + i * 2.2;
     const pA = toScreen(lay, GOAL.xMin, y);
     const pB = toScreen(lay, GOAL.xMax, y);
     g.moveTo(pA.x, pA.y);
     g.lineTo(pB.x, pB.y);
-    g.stroke({ width: Math.max(3, lay.scale * 0.18), color: 0x8a6238, alpha: 0.95 });
+    g.stroke({ width: Math.max(3, lay.scale * 0.18), color: i % 2 ? 0xc4894a : 0x8a6238, alpha: 0.95 });
+  }
+  for (const x of [GOAL.xMin + 2, (GOAL.xMin + GOAL.xMax) / 2, GOAL.xMax - 2]) {
+    const p = toScreen(lay, x, 8.6);
+    g.roundRect(p.x - lay.scale * 0.55, p.y, lay.scale * 1.1, lay.scale * SQUASH * 3.4, 2);
+    g.fill({ color: 0x4a311c });
+    g.stroke({ color: 0x2a1a0c, width: 1.4 });
   }
 
   const lamps: [number, number][] = [[20, 120], [52, 96], [18, 68], [54, 52], [36, 34]];
@@ -167,22 +211,35 @@ function paintWater(g: Graphics, lay: Layout, t: number) {
   const left = toScreen(lay, 0, 0);
   const right = toScreen(lay, WORLD_W, 8);
   g.rect(left.x, left.y - 6, right.x - left.x, toScreen(lay, 0, 8).y - left.y + 8);
-  g.fill({ color: 0x163a58, alpha: 0.72 });
+  g.fill({ color: 0x1a6a88, alpha: 0.82 });
   const side0 = toScreen(lay, 0, 8);
   const side1 = toScreen(lay, GOAL.xMin, GOAL.y + 2);
   g.rect(side0.x, side0.y, side1.x - side0.x, side1.y - side0.y);
-  g.fill({ color: 0x163a58, alpha: 0.45 });
+  g.fill({ color: 0x185878, alpha: 0.5 });
   const side2 = toScreen(lay, GOAL.xMax, 8);
   const side3 = toScreen(lay, WORLD_W, GOAL.y + 2);
   g.rect(side2.x, side2.y, side3.x - side2.x, side3.y - side2.y);
-  g.fill({ color: 0x163a58, alpha: 0.45 });
-  for (let i = 0; i < 6; i++) {
-    const y = 2 + i * 2.4 + Math.sin(t * 1.6 + i) * 0.5;
+  g.fill({ color: 0x185878, alpha: 0.5 });
+  for (let i = 0; i < 7; i++) {
+    const y = 1.4 + i * 2.2 + Math.sin(t * 1.6 + i) * 0.45;
     const p0 = toScreen(lay, 4, y);
     const p1 = toScreen(lay, WORLD_W - 4, y);
     g.moveTo(p0.x, p0.y);
     g.lineTo(p1.x, p1.y);
-    g.stroke({ width: 2, color: 0x7ec8e8, alpha: 0.18 + 0.12 * Math.sin(t * 2 + i) });
+    g.stroke({ width: 2.2, color: 0xa8e8ff, alpha: 0.16 + 0.14 * Math.sin(t * 2 + i) });
+  }
+  const pads: [number, number, number][] = [
+    [10, 3.2, 0.9],
+    [22, 5.4, 1.15],
+    [48, 2.6, 0.8],
+    [60, 4.8, 1.05],
+  ];
+  for (const [x, y, s] of pads) {
+    const p = toScreen(lay, x, y);
+    g.ellipse(p.x, p.y, lay.scale * 2.4 * s, lay.scale * SQUASH * 1.1 * s);
+    g.fill({ color: 0x3da85a, alpha: 0.72 });
+    g.circle(p.x, p.y - 1, lay.scale * 0.55 * s);
+    g.fill({ color: 0xff8aa0, alpha: 0.8 });
   }
 }
 
@@ -282,8 +339,11 @@ export default function SneakCanvas({
     if (!el) return;
     const app = new Application();
     let destroyed = false;
-    let dropT = 0;
     let camY = START.y - 50;
+    let cgStage = 0;
+    let cgStageT = 0;
+    let cgDone = false;
+    let playReady = false;
 
     app.init({ background: 0x0c1828, resizeTo: el, antialias: true }).then(async () => {
       if (destroyed || !el) {
@@ -297,16 +357,36 @@ export default function SneakCanvas({
       const water = new Graphics();
       const cones = new Graphics();
       const fx = new Graphics();
+      const worldLayer = new Container();
+      const introLayer = new Container();
       const entities = new Container();
       entities.sortableChildren = true;
-      app.stage.addChild(sky, ground, water, cones, entities, fx);
+      worldLayer.addChild(sky, ground, water, cones, entities, fx);
+      app.stage.addChild(worldLayer, introLayer);
+
+      const introBg = new Graphics();
+      const introPerson = makePersonView();
+      const introBubble = new Text({
+        text: "「就这里……翻过去就到钓鱼区了！」",
+        style: {
+          fill: 0xeafcff,
+          fontSize: 16,
+          fontWeight: "700",
+          stroke: { color: 0x061e36, width: 4 },
+          wordWrap: true,
+          wordWrapWidth: 220,
+          align: "center",
+        },
+      });
+      introBubble.anchor.set(0.5);
+      introLayer.addChild(introBg, introPerson.root, introBubble);
 
       let lay = layoutOf(app.screen.width, camY);
       const visH = () => visibleWorldH(app.screen.height, lay.scale, SQUASH, PAD_Y);
       camY = clampCamY(START.y - visH() * 0.62, visH());
       lay = layoutOf(app.screen.width, camY);
 
-      const player = { x: DROP_FROM.x, y: DROP_FROM.y };
+      const player = { x: START.x, y: START.y };
       const guards = makeGuards();
 
       const trees = TREES.map((tree) => {
@@ -326,7 +406,7 @@ export default function SneakCanvas({
         style: { fill: 0xfff6e8, fontSize: 11, fontWeight: "700", stroke: { color: 0x2a1a0c, width: 3 } },
       });
       youTag.anchor.set(0.5, 1);
-      youTag.y = -58;
+      youTag.y = -50;
       you.root.addChild(youTag);
       entities.addChild(you.root);
       let faceLeft = false;
@@ -349,14 +429,88 @@ export default function SneakCanvas({
         style: { fill: 0xfff6e8, fontSize: 14, fontWeight: "700", stroke: { color: 0x163246, width: 4 } },
       });
       goalTag.anchor.set(0.5, 0.5);
-      app.stage.addChild(goalTag);
+      entities.addChild(goalTag);
+
+      function beginPlay() {
+        if (playReady) return;
+        playReady = true;
+        player.x = START.x;
+        player.y = START.y;
+        camY = clampCamY(START.y - visH() * 0.62, visH());
+        lay = layoutOf(app.screen.width, camY);
+        introLayer.visible = false;
+        worldLayer.visible = true;
+        if (!landedRef.current) {
+          landedRef.current = true;
+          cb.current.onLanded();
+        }
+      }
 
       function followCam(py: number) {
-        const vis = visH();
-        const target = clampCamY(py - vis * 0.62, vis);
-        camY += (target - camY) * 0.12;
-        camY = clampCamY(camY, vis);
+        const vh = visH();
+        const targetY = clampCamY(py - vh * 0.62, vh);
+        camY += (targetY - camY) * CAM_LERP;
+        camY = clampCamY(camY, vh);
         lay = layoutOf(app.screen.width, camY);
+      }
+
+      function introPose(stage: number, k: number, w: number, h: number) {
+        const p0 = { x: w * 0.28, y: h * 0.78 };
+        const p1 = { x: w * 0.28, y: h * 0.52 };
+        const p2 = { x: w * 0.57, y: h * 0.46 };
+        const p3 = { x: w * 0.62, y: h * 0.78 };
+        if (stage <= 0) {
+          return { x: p0.x + (p1.x - p0.x) * k, y: p0.y + (p1.y - p0.y) * k };
+        }
+        if (stage === 1) {
+          return { x: p1.x + (p2.x - p1.x) * k, y: p1.y + (p2.y - p1.y) * k };
+        }
+        return { x: p2.x + (p3.x - p2.x) * k, y: p2.y + (p3.y - p2.y) * k };
+      }
+
+      function paintIntro(now: number) {
+        const w = app.screen.width;
+        const h = app.screen.height;
+        paintIntroBackdrop(introBg, w, h);
+        const pos = introPose(cgStage, cgStageT, w, h);
+        const climbing = cgStage === 1;
+        introPerson.body.clear();
+        paintPerson(pixiPen(introPerson.body), {
+          sex: lookSex,
+          look: lookOfOutfit(outfitId),
+          pose: "stand",
+          view: "front",
+          facingLeft: cgStage >= 1,
+          t: now,
+          armLift: climbing ? 0.55 : cgStage === 0 ? 0.15 : 0,
+          walking: climbing,
+        });
+        introPerson.root.position.set(pos.x, pos.y);
+        introPerson.root.scale.set(1.42);
+        introBubble.position.set(w * 0.62, h * 0.34);
+      }
+
+      function tickCg(dt: number) {
+        if (cgDone) return;
+        const ph = phaseRef.current;
+        if (ph !== "cg" && ph !== "play") return;
+        if (ph === "play") {
+          beginPlay();
+          cgDone = true;
+          return;
+        }
+        cgStageT += dt;
+        const dur = (CG_STAGE_MS[cgStage] ?? 420) / 1000;
+        if (cgStageT >= dur) {
+          cgStage += 1;
+          cgStageT = 0;
+          if (cgStage === 1) introBubble.text = "「翻！」";
+          else if (cgStage === 2) introBubble.text = "「安全落地！」";
+          else if (cgStage >= 3) {
+            cgDone = true;
+            beginPlay();
+          }
+        }
       }
 
       function placeStatic() {
@@ -382,7 +536,10 @@ export default function SneakCanvas({
         paintGround(ground, lay);
         paintWater(water, lay, 0);
         placeStatic();
+        paintIntro(0);
       }
+      worldLayer.visible = false;
+      introLayer.visible = true;
       relayout();
       app.renderer.on("resize", relayout);
 
@@ -392,17 +549,10 @@ export default function SneakCanvas({
         const now = performance.now() / 1000;
         const ph = phaseRef.current;
 
-        if (ph === "cg") {
-          dropT += dt;
-          const k = Math.min(1, dropT / 1.55);
-          const e = 1 - (1 - k) * (1 - k);
-          player.x = DROP_FROM.x + (START.x - DROP_FROM.x) * e;
-          player.y = DROP_FROM.y + (START.y - DROP_FROM.y) * e;
-          if (k >= 1 && !landedRef.current) {
-            landedRef.current = true;
-            cb.current.onLanded();
-          }
-        } else if (ph === "play" && !endedRef.current) {
+        tickCg(dt);
+        if (ph === "play" && !playReady) beginPlay();
+
+        if (ph === "play" && !endedRef.current) {
           const st = stickRef.current;
           const next = resolvePos(player.x + st.dx * 34 * dt, player.y + st.dy * 34 * dt);
           player.x = next.x;
@@ -426,72 +576,82 @@ export default function SneakCanvas({
           }
         }
 
-        followCam(player.y);
-        paintSky(sky, app.screen.width, app.screen.height, now);
-        paintGround(ground, lay);
-        paintWater(water, lay, now);
-        placeStatic();
+        if (playReady) {
+          followCam(player.y);
+          paintSky(sky, app.screen.width, app.screen.height, now);
+          paintGround(ground, lay);
+          paintWater(water, lay, now);
+          placeStatic();
+        } else {
+          paintIntro(now);
+        }
 
         cones.clear();
-        if (ph === "play" || ph === "cg") {
+        if (playReady && (ph === "play" || ph === "cg")) {
           for (const g of guards) paintCone(cones, lay, g);
         }
 
         fx.clear();
-        for (let i = 0; i < 10; i++) {
-          const x = 8 + hash(i + 1) * (WORLD_W - 16);
-          const y = 16 + hash(i + 4) * (WORLD_H - 28);
-          const p = toScreen(lay, x, y);
-          const bob = Math.sin(now * 1.7 + i) * 6;
-          fx.circle(p.x + Math.sin(now + i) * 8, p.y + bob, 1.6);
-          fx.fill({ color: 0xd8ff9a, alpha: 0.25 + 0.45 * (0.5 + 0.5 * Math.sin(now * 3 + i)) });
+        if (playReady) {
+          for (let i = 0; i < 10; i++) {
+            const x = 8 + hash(i + 1) * (WORLD_W - 16);
+            const y = 16 + hash(i + 4) * (WORLD_H - 28);
+            const p = toScreen(lay, x, y);
+            const bob = Math.sin(now * 1.7 + i) * 6;
+            fx.circle(p.x + Math.sin(now + i) * 8, p.y + bob, 1.6);
+            fx.fill({ color: 0xd8ff9a, alpha: 0.25 + 0.45 * (0.5 + 0.5 * Math.sin(now * 3 + i)) });
+          }
         }
 
         const persp = (wy: number) => 0.72 + (wy / WORLD_H) * 0.4;
         const moving = Math.hypot(stickRef.current.dx, stickRef.current.dy) > 0.08 && ph === "play";
-        const pScreen = toScreen(lay, player.x, player.y);
-        const dx = stickRef.current.dx;
-        if (dx < -0.15) faceLeft = true;
-        else if (dx > 0.15) faceLeft = false;
-        you.body.clear();
-        paintPerson(pixiPen(you.body), {
-          sex: lookSex,
-          look: lookOfOutfit(outfitId),
-          pose: "stand",
-          facingLeft: faceLeft,
-          t: now,
-          armLift: armLiftForMotion(moving ? "walk" : "idle", 0, now),
-        });
-        you.root.position.set(pScreen.x, pScreen.y + (moving ? Math.sin(now * 14) * 1.6 : 0));
-        you.root.scale.set(persp(player.y));
-        you.root.alpha = hiddenRef.current ? 0.58 : 1;
-        you.root.zIndex = player.y * 10 + 3;
+        if (playReady) {
+          const pScreen = toScreen(lay, player.x, player.y);
+          const dx = stickRef.current.dx;
+          if (dx < -0.15) faceLeft = true;
+          else if (dx > 0.15) faceLeft = false;
+          you.body.clear();
+          paintPerson(pixiPen(you.body), {
+            sex: lookSex,
+            look: lookOfOutfit(outfitId),
+            pose: "stand",
+            view: "front",
+            facingLeft: faceLeft,
+            t: now,
+            armLift: armLiftForMotion(moving ? "walk" : "idle", 0, now),
+            walking: moving,
+          });
+          you.root.position.set(pScreen.x, pScreen.y + (moving ? Math.sin(now * 14) * 1.6 : 0));
+          you.root.scale.set(persp(player.y) * 1.5);
+          you.root.alpha = hiddenRef.current ? 0.58 : 1;
+          you.root.zIndex = player.y * 10 + 3;
 
-        guards.forEach((g, i) => {
-          const view = guardViews[i];
-          if (!view) return;
-          const p = toScreen(lay, g.x, g.y);
-          const left = Math.cos(g.facing) < 0;
-          paintGuard(view.body, left, now);
-          view.root.position.set(p.x, p.y);
-          view.root.scale.set(persp(g.y));
-          view.root.zIndex = g.y * 10 + 3;
-        });
+          guards.forEach((g, i) => {
+            const view = guardViews[i];
+            if (!view) return;
+            const p = toScreen(lay, g.x, g.y);
+            const left = Math.cos(g.facing) < 0;
+            paintGuard(view.body, left, now);
+            view.root.position.set(p.x, p.y);
+            view.root.scale.set(persp(g.y));
+            view.root.zIndex = g.y * 10 + 3;
+          });
 
-        TREES.forEach((tree, i) => {
-          const node = trees[i];
-          if (!node) return;
-          node.zIndex = tree.y * 10 + 2;
-        });
+          TREES.forEach((tree, i) => {
+            const node = trees[i];
+            if (!node) return;
+            node.zIndex = tree.y * 10 + 2;
+          });
 
-        bushViews.forEach(({ c, g }, i) => {
-          const bush = BUSHES[i];
-          if (!bush) return;
-          const rustle = inBush(player.x, player.y, bush);
-          paintBush(g, lay, rustle, now);
-          c.zIndex = bush.y * 10;
-          c.scale.set(persp(bush.y) * (rustle ? 1.04 : 1));
-        });
+          bushViews.forEach(({ c, g }, i) => {
+            const bush = BUSHES[i];
+            if (!bush) return;
+            const rustle = inBush(player.x, player.y, bush);
+            paintBush(g, lay, rustle, now);
+            c.zIndex = bush.y * 10;
+            c.scale.set(persp(bush.y) * (rustle ? 1.04 : 1));
+          });
+        }
       };
 
       app.ticker.add(tick);

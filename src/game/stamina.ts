@@ -8,14 +8,18 @@ export const STAMINA_PER_LEVEL = 10;
 export const REGEN_SEC_START = 480;
 export const REGEN_SEC_MIN = 120;
 export const SALT_PRICE = 1;
+export const SALT_PACK_SIZE = 10;
 export const STARTER_SALT = 10;
-export const ENERGY_DRINK_PRICE = 30;
+export const ENERGY_DRINK_PRICE = 1;
 export const ENERGY_DRINK_STAMINA = 40;
 export const YUANQI_FILL = 50;
 export const YUANQI_RESTORE = 50;
 export const YUANQI_MAX = 3;
 export const COOK_SALT_COST = 1;
 export const QUEST_SALT_GIFT = 10;
+export const DISH_SHELF_DAYS = 3;
+/** 两道菜之间的现实间隔。能量饮料 / 元气瓶不受此限。 */
+export const DISH_EAT_INTERVAL_MS = 5 * 60 * 1000;
 
 export const IDLE_STAMINA_RANGE: Record<Quality, [number, number]> = {
   common: [6, 10],
@@ -55,8 +59,41 @@ export function xpToNext(level: number): number {
   return 80 + (level - 1) * 40;
 }
 
-export function satietyMax(level: number): number {
-  return 3 + Math.floor(Math.min(level, PLAYER_LEVEL_MAX) / 10);
+export function satietyMax(_level?: number): number {
+  return 3;
+}
+
+export function satietyLeft(save: SaveData): { used: number; max: number; left: number } {
+  const max = satietyMax(save.playerLevel);
+  const used = save.satietyDay === save.gameDay ? save.satietyUsed : 0;
+  return { used, max, left: Math.max(0, max - used) };
+}
+
+/** 每吃一道 +33%，第三次起满格。 */
+export function satietyPercent(used: number, max = 3): number {
+  if (used <= 0) return 0;
+  if (used >= max) return 100;
+  return used * 33;
+}
+
+/** 顶栏 / 道具页：未满显示饱腹值%，满了说无法再进食。 */
+export function satietyHint(save: SaveData): string {
+  const { used, max, left } = satietyLeft(save);
+  if (left <= 0) return "无法再进食";
+  return `饱腹值 ${satietyPercent(used, max)}%`;
+}
+
+export function dishEatWaitMs(lastAteAt: number | undefined, now: number): number {
+  if (!lastAteAt) return 0;
+  return Math.max(0, lastAteAt + DISH_EAT_INTERVAL_MS - now);
+}
+
+export function formatWait(ms: number): string {
+  const s = Math.max(1, Math.ceil(ms / 1000));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  if (m <= 0) return `${r} 秒`;
+  return r ? `${m} 分 ${r} 秒` : `${m} 分`;
 }
 
 export function idleStaminaCostForDef(defId: string): number {
@@ -71,6 +108,14 @@ export function idleStaminaCostForDef(defId: string): number {
 export function cookRestore(defId: string, firstOfDay: boolean): number {
   const base = Math.ceil(idleStaminaCostForDef(defId) * 1.5);
   return firstOfDay ? Math.ceil(base * 1.5) : base;
+}
+
+export function dishExpired(cookedDay: number, gameDay: number): boolean {
+  return gameDay >= cookedDay + DISH_SHELF_DAYS;
+}
+
+export function dishDaysLeft(cookedDay: number, gameDay: number): number {
+  return Math.max(0, cookedDay + DISH_SHELF_DAYS - gameDay);
 }
 
 export function addStamina(save: SaveData, amount: number): void {

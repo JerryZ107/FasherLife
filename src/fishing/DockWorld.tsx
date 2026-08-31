@@ -1,9 +1,11 @@
 import PersonView, { type PersonMotion } from "../art/PersonView";
 import { FISH_BY_ID } from "../data/fishDefs";
 import { fishWeightKg } from "../game/weight";
-import { FishPortrait, GearIcon } from "../art/Art";
+import { FishPortrait, GearIcon, JunkMark } from "../art/Art";
 import { FISHING_SPOTS, type NeighborState, type NeighborStatus } from "./neighbors";
+import DockBackdrop from "./DockBackdrop";
 import type { FishDef, Sex } from "../types";
+import type { JunkKind } from "../data/junkDefs";
 import type { CSSProperties } from "react";
 
 export type Phase =
@@ -14,6 +16,7 @@ export type Phase =
   | "reeling"
   | "bite"
   | "minigame"
+  | "idle_fight"
   | "result";
 
 export const WORLD_VW = 340;
@@ -25,34 +28,17 @@ type Props = {
   spotId: string | null;
   neighbors: NeighborState[];
   playerFishId: string | null;
+  playerJunkKind?: JunkKind | null;
   playerEscaped: boolean;
   onPickSpot: (id: string) => void;
   castPower?: number;
   playerOutfitId?: string;
   playerSex?: Sex;
   chargePower?: number;
+  fisheryId?: string;
 };
 
-const CLOUDS = [
-  { cls: "a", left: "8%" },
-  { cls: "b", left: "38%" },
-  { cls: "c", left: "62%" },
-  { cls: "d", left: "86%" },
-];
-
-const LILIES = [
-  { left: "6%", top: "18%", s: 1 },
-  { left: "18%", top: "58%", s: 0.8 },
-  { left: "31%", top: "28%", s: 1.15 },
-  { left: "44%", top: "66%", s: 0.9 },
-  { left: "57%", top: "22%", s: 1.05 },
-  { left: "69%", top: "52%", s: 0.75 },
-  { left: "81%", top: "34%", s: 1.2 },
-  { left: "92%", top: "60%", s: 0.85 },
-];
-
-const REEDS = ["7%", "22%", "41%", "59%", "77%", "94%"];
-const SPARKS = [8, 18, 28, 39, 48, 57, 67, 76, 86, 94];
+const SPARKS = [8, 15, 23, 32, 41, 50, 59, 68, 77, 86, 94];
 
 export default function DockWorld({
   pan,
@@ -61,70 +47,41 @@ export default function DockWorld({
   spotId,
   neighbors,
   playerFishId,
+  playerJunkKind = null,
   playerEscaped,
   onPickSpot,
   castPower = 0.55,
   playerOutfitId,
   playerSex = "male",
   chargePower = 0,
+  fisheryId = "village_pond",
 }: Props) {
-  const bite = phase === "bite" || phase === "minigame";
+  const bite = phase === "bite" || phase === "minigame" || phase === "idle_fight";
+  const stream = fisheryId === "clear_stream";
   return (
     <div className="dock-view">
       <div
-        className={`dock-world ${snapping ? "is-snap" : ""} is-${phase}${bite ? " is-hotwater" : ""}`}
+        className={`dock-world ${snapping ? "is-snap" : ""} is-${phase}${bite ? " is-hotwater" : ""}${stream ? " is-stream" : " is-pond"}`}
         style={{ width: `${WORLD_VW}%`, transform: `translateX(${-pan}px)` }}
       >
-        <div className="dock-sky">
-          <div className="dock-sun" />
-          {CLOUDS.map((c) => (
-            <div key={c.cls} className={`dock-cloud ${c.cls}`} style={{ left: c.left }} />
-          ))}
-          <div className="dock-bird a" />
-          <div className="dock-bird b" />
-        </div>
-        <div className="dock-range" />
-        <div className="dock-hills">
-          <span className="dock-grove g1" />
-          <span className="dock-grove g2" />
-          <span className="dock-grove g3" />
-          <span className="dock-grove g4" />
-        </div>
-        <div className="dock-water">
+        <DockBackdrop hot={bite} variant={stream ? "stream" : "pond"} />
+        <div className="dock-water-fx">
           <div className="dock-caustic" />
-          <div className="dock-wave w1" />
-          <div className="dock-wave w2" />
-          <div className="dock-wave w3" />
+          <div className="dock-sheen" />
           {SPARKS.map((x, i) => (
-            <span key={x} className="dock-spark" style={{ left: `${x}%`, animationDelay: `${i * 0.35}s` }} />
-          ))}
-          {LILIES.map((l, i) => (
             <span
-              key={i}
-              className="dock-lily"
-              style={{ left: l.left, top: l.top, transform: `scale(${l.s})` }}
+              key={x}
+              className="dock-spark"
+              style={{ left: `${x}%`, top: `${16 + (i % 4) * 18}%`, animationDelay: `${i * 0.22}s` }}
             />
           ))}
-          {REEDS.map((left) => (
-            <span key={left} className="dock-reed" style={{ left }} />
-          ))}
-          <span className="dock-leap a" />
-          <span className="dock-leap b" />
-        </div>
-        <div className="dock-shore" />
-        <div className="dock-plank">
-          <div className="dock-plank-grain" />
-          <div className="dock-nails" />
-          <div className="dock-rope" />
-        </div>
-        <div className="dock-edge" />
-        <div className="dock-posts">
-          {[11, 21, 31, 41, 51, 61, 71, 81].map((x) => (
-            <span key={x} className="dock-post" style={{ left: `${x}%` }} />
-          ))}
+          <span className="dock-bug a" />
+          <span className="dock-bug b" />
         </div>
 
-        {FISHING_SPOTS.map((s) => {
+        {(() => {
+          let seatMarked = false;
+          return FISHING_SPOTS.map((s) => {
           const npc = neighbors.find((n) => n.spotId === s.id);
           const isPlayer = spotId === s.id;
           if (npc) {
@@ -141,7 +98,12 @@ export default function DockWorld({
               />
             );
           }
-          const canSeat = phase === "pick" || phase === "ready";
+          const canSeat =
+            phase === "pick" ||
+            phase === "ready" ||
+            phase === "waiting" ||
+            phase === "idle_fight" ||
+            phase === "result";
           if (isPlayer) {
             return (
               <Angler
@@ -151,6 +113,7 @@ export default function DockWorld({
                 you
                 status={playerStatus(phase, playerEscaped)}
                 fishId={playerFishId}
+                junkKind={playerJunkKind}
                 outfitId={playerOutfitId}
                 sex={playerSex}
                 castPower={castPower}
@@ -163,6 +126,7 @@ export default function DockWorld({
               key={s.id}
               className={`dock-empty ${canSeat ? "is-pickable" : ""}`}
               data-spot={s.id}
+              data-guide={canSeat && !seatMarked ? ((seatMarked = true), "seat") : undefined}
               style={{ left: `${s.x}%` }}
               onClick={(e) => {
                 e.stopPropagation();
@@ -170,11 +134,18 @@ export default function DockWorld({
                 onPickSpot(s.id);
               }}
             >
+              <span className="dock-hole" aria-hidden>
+                <i />
+                <i />
+                <i />
+              </span>
               <span className="dock-stool" />
-              <span className="dock-empty-label">{canSeat ? (phase === "ready" ? "换座" : "坐下") : s.label}</span>
+              <span className="dock-bucket" />
+              <span className="dock-empty-label">{canSeat ? (spotId ? "换座" : "坐下") : s.label}</span>
             </button>
           );
-        })}
+        });
+        })()}
       </div>
     </div>
   );
@@ -194,7 +165,7 @@ function playerStatus(phase: Phase, escaped: boolean): NeighborStatus | "casting
   if (phase === "waiting") return "waiting";
   if (phase === "reeling") return "reeling";
   if (phase === "bite") return "bite";
-  if (phase === "minigame") return "fighting";
+  if (phase === "minigame" || phase === "idle_fight") return "fighting";
   if (phase === "result") return escaped ? "missed" : "caught";
   return "ready";
 }
@@ -222,6 +193,14 @@ function catchFlyStyle(def: FishDef): CSSProperties {
   } as CSSProperties;
 }
 
+function catchJunkStyle(): CSSProperties {
+  return {
+    "--fish-r": "22px",
+    "--arc-x": "24px",
+    "--arc-y": "42px",
+  } as CSSProperties;
+}
+
 function Angler({
   x,
   name,
@@ -230,6 +209,7 @@ function Angler({
   you,
   status,
   fishId,
+  junkKind = null,
   castPower = 0.55,
   chargePower = 0,
 }: {
@@ -240,11 +220,12 @@ function Angler({
   you?: boolean;
   status: NeighborStatus | "casting" | "bite" | "ready" | "reeling";
   fishId: string | null;
+  junkKind?: JunkKind | null;
   castPower?: number;
   chargePower?: number;
 }) {
   const fish = fishId ? FISH_BY_ID[fishId] : null;
-  const showLanded = Boolean(fish && status === "caught");
+  const showLanded = Boolean((fish || junkKind) && status === "caught");
   const showRod = status !== "caught";
   const showLine =
     status === "waiting" ||
@@ -263,35 +244,51 @@ function Angler({
   return (
     <div className={`angler ${you ? "is-you" : ""} is-${status}${charging ? " is-charging" : ""}`} style={style}>
       <div className="angler-name">{name}</div>
-      {showRod && <div className="angler-rod" />}
+      {status === "bite" && (
+        <div className="angler-exclaim" aria-hidden>
+          !
+        </div>
+      )}
       {showLine && (
         <>
           <div className="angler-line" />
-          {(status === "casting" || status === "waiting" || status === "bite" || status === "fighting" || status === "missed" || status === "reeling") && (
+          {(status === "casting" ||
+            status === "waiting" ||
+            status === "bite" ||
+            status === "fighting" ||
+            status === "missed" ||
+            status === "reeling") && (
             <>
               <div className="angler-bobber" />
               <div className="angler-ripple" />
+              <div className="angler-splash" />
             </>
           )}
         </>
       )}
-      <span className="dock-stool seated" />
       <span className="angler-sprite">
         <PersonView
           outfitId={outfitId}
           sex={sex}
           pose="sit"
+          view="back"
           motion={personMotion(status, charging)}
           charge={chargePower}
-          size={you ? 112 : 104}
+          holdRod={showRod}
+          size={you ? 136 : 118}
         />
       </span>
       <span className="angler-basket" aria-hidden>
-        <GearIcon kind="basket" size={you ? 34 : 30} />
+        <GearIcon kind="basket" size={you ? 32 : 28} />
       </span>
       {showLanded && fish && (
         <span className="angler-catch-fly" key={`${fish.id}-${status}`} style={catchFlyStyle(fish)}>
           <FishPortrait id={fish.id} size={Math.round(20 + fishWeightKg(fish) * 12) * 2} alt="" />
+        </span>
+      )}
+      {showLanded && junkKind && !fish && (
+        <span className="angler-catch-fly" key={`${junkKind}-${status}`} style={catchJunkStyle()}>
+          <JunkMark kind={junkKind} size={44} />
         </span>
       )}
     </div>

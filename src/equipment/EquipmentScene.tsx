@@ -1,15 +1,19 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useGame } from "../store/gameStore";
-import { PART_BY_ID, PART_DEFS, ROD_BY_ID, STOOL_BY_ID, BASKET_BY_ID } from "../data/equipmentDefs";
-import { CONSUMABLE_BY_ID, CONSUMABLE_DEFS, foodIdFromBait } from "../data/consumableDefs";
+import { PART_BY_ID, PART_DEFS, ROD_BY_ID, STOOL_BY_ID, BASKET_BY_ID, basketShopHint, partStatHint, rodShopHint, stoolHint } from "../data/equipmentDefs";
+import { CONSUMABLE_BY_ID, baitShopHint } from "../data/consumableDefs";
 import { OUTFIT_DEFS } from "../data/outfitDefs";
 import { BOOK_DEFS } from "../data/bookDefs";
-import { QUALITY_LABEL, ROD_PART_DESC, ROD_PART_LABEL, ROD_PART_SLOTS, type RodPartSlot } from "../types";
+import { ROD_PART_LABEL, ROD_PART_SLOTS, type RodPartSlot } from "../types";
 import { basketWeightKg } from "../game/weight";
-import { GearIcon } from "../art/Art";
+import { dishDaysLeft, dishEatWaitMs, dishExpired, ENERGY_DRINK_STAMINA, formatWait, satietyHint, satietyLeft, YUANQI_RESTORE } from "../game/stamina";
+import { FISH_BY_ID } from "../data/fishDefs";
+import { FishPortrait, GearIcon } from "../art/Art";
 import PersonView from "../art/PersonView";
+import { EmptyHint, GoodsRow, ModalSheet, Page, PageBody, PageHead, QualityChip, TabBar } from "../ui/chrome";
+import { useUi } from "../store/uiStore";
 
-type Tab = "rod" | "bait" | "stool" | "basket" | "outfit" | "book";
+type Tab = "rod" | "bait" | "stool" | "basket" | "energy" | "outfit" | "book";
 
 export default function EquipmentScene() {
   const save = useGame((s) => s.save);
@@ -18,39 +22,59 @@ export default function EquipmentScene() {
   const equipOutfit = useGame((s) => s.equipOutfit);
   const setLookSex = useGame((s) => s.setLookSex);
   const toggleTripBait = useGame((s) => s.toggleTripBait);
+  const eatDish = useGame((s) => s.eatDish);
+  const discardDish = useGame((s) => s.discardDish);
+  const drinkEnergy = useGame((s) => s.drinkEnergy);
+  const drinkYuanqi = useGame((s) => s.drinkYuanqi);
   const setScene = useGame((s) => s.setScene);
   const [tab, setTab] = useState<Tab>("rod");
   const [rodInspect, setRodInspect] = useState<string | null>(null);
   const [swapSlot, setSwapSlot] = useState<RodPartSlot | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const setEquipCurrentTab = useUi((s) => s.setEquipCurrentTab);
+
+  useEffect(() => {
+    setEquipCurrentTab(tab);
+    return () => setEquipCurrentTab(null);
+  }, [tab, setEquipCurrentTab]);
+
+  useEffect(() => {
+    if (tab !== "energy") return;
+    const t = window.setInterval(() => setNow(Date.now()), 250);
+    return () => window.clearInterval(t);
+  }, [tab]);
 
   const basket = BASKET_BY_ID[save.equipped.basket];
   const trip = save.equippedBaitIds ?? [save.equipped.bait];
   const bw = basketWeightKg(save.basket);
+  const meals = satietyLeft(save);
+  const eatWait = dishEatWaitMs(save.lastDishAteAt, now);
 
   const slotParts = (slot: RodPartSlot) =>
     PART_DEFS.filter((p) => p.slot === slot && save.ownedParts.includes(p.id));
 
   return (
-    <div className="page">
-      <div className="page-head">
-        <button onClick={() => setScene("aquarium")}>← 返回</button>
-        <h2>装备</h2>
-      </div>
-      <div className="tabrow wrap">
-        {([
-          ["rod", "鱼竿"],
-          ["bait", "鱼饵"],
-          ["stool", "板凳"],
-          ["basket", "鱼筐"],
-          ["outfit", "服装"],
-          ["book", "书籍"],
-        ] as [Tab, string][]).map(([t, l]) => (
-          <button key={t} className={tab === t ? "primary" : ""} onClick={() => setTab(t)}>{l}</button>
-        ))}
-      </div>
-      <div className="page-body">
+    <Page>
+      <PageHead onBack={() => setScene("aquarium")} title="背包" />
+      <TabBar
+        items={[
+          { id: "rod", label: "鱼竿" },
+          { id: "bait", label: "鱼饵" },
+          { id: "stool", label: "板凳" },
+          { id: "basket", label: "鱼筐" },
+          { id: "energy", label: "道具", guide: "equip-tab-energy" },
+          { id: "outfit", label: "服装" },
+          { id: "book", label: "书籍", guide: "equip-tab-book" },
+        ]}
+        value={tab}
+        onChange={setTab}
+      />
+      <PageBody>
         {tab === "rod" && (
           <>
+            <p className="dim" style={{ padding: "4px 14px" }}>
+              点一根竿，可换轮、线、钩、漂。
+            </p>
             {save.ownedRods.map((id) => {
               const r = ROD_BY_ID[id];
               return (
@@ -65,17 +89,22 @@ export default function EquipmentScene() {
                   <GearIcon kind="rod" size={48} />
                   <span className="fish-pick-meta">
                     <strong>{r.name}</strong>
-                    <span className={`chip ${r.quality}`}>{QUALITY_LABEL[r.quality]}</span>
-                    {save.equipped.rod === id && <span className="dim">已装备 · 点开改装五件套</span>}
+                    <QualityChip quality={r.quality} />
+                    <span className="dim">
+                      {rodShopHint(r)} · {save.equipped.rod === id ? "使用中 · 点开换配件" : "点按装备"}
+                    </span>
                   </span>
                 </button>
               );
             })}
             {rodInspect && ROD_BY_ID[rodInspect] && (
-              <div className="modal-backdrop" onClick={() => { setRodInspect(null); setSwapSlot(null); }}>
-                <div className="modal" onClick={(e) => e.stopPropagation()}>
-                  <div className="modal-title">{ROD_BY_ID[rodInspect].name} · 五个组件</div>
-                  <p className="dim">手杆对其余四件做系数增幅。改装换已拥有的散件。</p>
+              <ModalSheet
+                title={ROD_BY_ID[rodInspect].name}
+                onClose={() => { setRodInspect(null); setSwapSlot(null); }}
+              >
+                  <p className="dim">
+                    点「更换」换配件。
+                  </p>
                   <div className="rod-parts">
                     {ROD_PART_SLOTS.map((slot) => {
                       const pid = save.equippedParts[slot];
@@ -84,98 +113,172 @@ export default function EquipmentScene() {
                         <div className="rod-part" key={slot}>
                           <div>
                             <strong>{ROD_PART_LABEL[slot]}</strong>
-                            <div className="dim">{ROD_PART_DESC[slot]} · {part?.name ?? "—"}</div>
+                            <div className="dim">{part ? `${part.name} · ${partStatHint(part)}` : "空"}</div>
                           </div>
-                          <button onClick={() => setSwapSlot(slot)}>改装</button>
+                          <button onClick={() => setSwapSlot(slot)}>更换</button>
                         </div>
                       );
                     })}
                   </div>
                   {swapSlot && (
                     <div className="panel" style={{ margin: "8px 0" }}>
-                      <div className="dim">换成{ROD_PART_LABEL[swapSlot]}</div>
+                      <div className="dim">选用{ROD_PART_LABEL[swapSlot]}</div>
                       {slotParts(swapSlot).map((p) => (
                         <button
                           key={p.id}
                           className={save.equippedParts[swapSlot] === p.id ? "primary" : ""}
                           onClick={() => { equipPart(swapSlot, p.id); setSwapSlot(null); }}
                         >
-                          {p.name} <span className={`chip ${p.quality}`}>{QUALITY_LABEL[p.quality]}</span>
+                          {p.name} · {partStatHint(p)} <QualityChip quality={p.quality} />
                         </button>
                       ))}
+                      {slotParts(swapSlot).length === 0 && <p className="dim">包里还没有别的{ROD_PART_LABEL[swapSlot]}，去商城看看。</p>}
                     </div>
                   )}
                   <button className="primary" onClick={() => { setRodInspect(null); setSwapSlot(null); }}>关闭</button>
-                </div>
-              </div>
+              </ModalSheet>
             )}
           </>
         )}
 
         {tab === "bait" && (
           <>
-            <div className="panel dim">勾选出钓携带（可多选），高亮为当前下竿消耗的那一种。鱼食在本页下方切换，喂鱼用。</div>
+            <p className="dim" style={{ padding: "4px 14px" }}>勾选要带的饵。高亮的是下竿用的。</p>
             {Object.entries(save.baitStock).filter(([, n]) => n > 0).map(([id, n]) => {
               const c = CONSUMABLE_BY_ID[id];
               if (!c) return null;
               const inTrip = trip.includes(id);
               const active = save.equipped.bait === id;
               return (
-                <div className="panel row-between" key={id}>
-                  <div className="row" style={{ alignItems: "center" }}>
-                    <GearIcon kind="bait" size={40} />
-                    <div>
-                      {c.name} ×{n} <span className={`chip ${c.quality}`}>{QUALITY_LABEL[c.quality]}</span>
-                      <div className="dim">同品质鱼上钩加成；主偏饵再加成</div>
+                <GoodsRow
+                  key={id}
+                  icon={<GearIcon kind="bait" size={40} />}
+                  title={`${c.name} ×${n}`}
+                  quality={c.quality}
+                  hint={baitShopHint(c)}
+                  action={
+                    <div className="row">
+                      <button className={inTrip ? "primary" : ""} onClick={() => toggleTripBait(id)}>
+                        {inTrip ? "已携带" : "携带"}
+                      </button>
+                      <button className={active ? "primary" : ""} onClick={() => equip("bait", id)}>当前</button>
                     </div>
-                  </div>
-                  <div className="row">
-                    <button className={inTrip ? "primary" : ""} onClick={() => toggleTripBait(id)}>
-                      {inTrip ? "已携带" : "携带"}
-                    </button>
-                    <button className={active ? "primary" : ""} onClick={() => equip("bait", id)}>当前</button>
-                  </div>
-                </div>
-              );
-            })}
-            <div className="panel dim">当前鱼食（水族馆喂食，不是鱼饵）</div>
-            {CONSUMABLE_DEFS.filter((c) => (save.foodStock[foodIdFromBait(c.id)] ?? 0) > 0 || save.equipped.food === foodIdFromBait(c.id)).map((c) => {
-              const fid = foodIdFromBait(c.id);
-              const n = save.foodStock[fid] ?? 0;
-              return (
-                <div className="panel row-between" key={fid}>
-                  <div>
-                    {c.name}鱼食 ×{n} <span className={`chip ${c.quality}`}>{QUALITY_LABEL[c.quality]}</span>
-                  </div>
-                  <button className={save.equipped.food === fid ? "primary" : ""} onClick={() => equip("food", fid)}>
-                    {save.equipped.food === fid ? "喂食用" : "设为当前"}
-                  </button>
-                </div>
+                  }
+                />
               );
             })}
           </>
         )}
 
-        {tab === "stool" && save.ownedStools.map((id) => {
-          const s = STOOL_BY_ID[id];
-          return (
-            <button key={id} className={save.equipped.stool === id ? "primary" : ""} onClick={() => equip("stool", id)}>
-              <GearIcon kind="stool" size={22} /> {s.name} · 玩家滑块 +{s.playerSliderBonus}
-            </button>
-          );
-        })}
+        {tab === "stool" && (
+          <>
+            <p className="dim" style={{ padding: "4px 14px" }}>
+              影响搏斗时滑块大小。
+            </p>
+            {save.ownedStools.map((id) => {
+              const s = STOOL_BY_ID[id];
+              return (
+                <GoodsRow
+                  key={id}
+                  icon={<GearIcon kind="stool" size={40} />}
+                  title={s.name}
+                  quality={s.quality}
+                  hint={stoolHint(s)}
+                  action={
+                    <button className={save.equipped.stool === id ? "primary" : ""} onClick={() => equip("stool", id)}>
+                      {save.equipped.stool === id ? "已装备" : "装备"}
+                    </button>
+                  }
+                />
+              );
+            })}
+          </>
+        )}
 
         {tab === "basket" && (
           <>
-            <div className="panel dim">当前 {save.basket.length}/{basket?.capacity} 条 · {bw.toFixed(1)}/{basket?.weightCap}kg</div>
+            <p className="dim" style={{ padding: "4px 14px" }}>当前 {save.basket.length}/{basket?.capacity} 条 · {bw.toFixed(1)}/{basket?.weightCap}kg</p>
             {save.ownedBaskets.map((id) => {
               const b = BASKET_BY_ID[id];
               return (
-                <button key={id} className={save.equipped.basket === id ? "primary" : ""} onClick={() => equip("basket", id)}>
-                  <GearIcon kind="basket" size={22} /> {b.name}（{b.capacity}条 / {b.weightCap}kg）
-                </button>
+                <GoodsRow
+                  key={id}
+                  icon={<GearIcon kind="basket" size={40} />}
+                  title={b.name}
+                  quality={b.quality}
+                  hint={basketShopHint(b)}
+                  action={
+                    <button className={save.equipped.basket === id ? "primary" : ""} onClick={() => equip("basket", id)}>
+                      {save.equipped.basket === id ? "已装备" : "装备"}
+                    </button>
+                  }
+                />
               );
             })}
+          </>
+        )}
+
+        {tab === "energy" && (
+          <>
+            <p className="dim" style={{ padding: "4px 14px" }}>
+              {satietyHint(save)}。菜 3 天过期。饮料随时能喝。
+            </p>
+            {(save.dishes ?? []).map((d, i) => {
+              const def = FISH_BY_ID[d.defId];
+              if (!def) return null;
+              const expired = dishExpired(d.cookedDay, save.gameDay);
+              const shelf = dishDaysLeft(d.cookedDay, save.gameDay);
+              const eatLabel = expired ? "丢弃"
+                : meals.left <= 0 ? "无法再进食"
+                : eatWait > 0 ? `还要等 ${formatWait(eatWait)}`
+                : "吃";
+              return (
+                <div className="panel row-between" key={d.uid}>
+                  <div className="row" style={{ alignItems: "center" }}>
+                    <FishPortrait id={def.id} size={40} alt={def.name} />
+                    <div>
+                      <strong>{def.name}菜</strong>
+                      <QualityChip quality={def.quality} />
+                      <div className="dim">
+                        +{d.restore} 能量 · {expired ? "已过期" : `还能放 ${shelf} 天`}
+                      </div>
+                    </div>
+                  </div>
+                  {expired ? (
+                    <button className="danger" onClick={() => discardDish(d.uid)}>丢弃</button>
+                  ) : (
+                    <button className="primary" data-guide={i === 0 ? "eat-dish" : undefined} onClick={() => eatDish(d.uid)}>{eatLabel}</button>
+                  )}
+                </div>
+              );
+            })}
+            {(save.dishes ?? []).length === 0 && <EmptyHint>还没有菜，去做菜页做。</EmptyHint>}
+            <div className="panel row-between">
+              <div>
+                <strong>能量饮料</strong>
+                <div className="dim">+{ENERGY_DRINK_STAMINA} 能量 · 无保质期 · 库存 {save.energyDrinkStock ?? 0}</div>
+              </div>
+              <button
+                className="primary"
+                disabled={(save.energyDrinkStock ?? 0) < 1}
+                onClick={() => drinkEnergy()}
+              >
+                使用
+              </button>
+            </div>
+            <div className="panel row-between">
+              <div>
+                <strong>元气瓶</strong>
+                <div className="dim">+{YUANQI_RESTORE} 能量 · 无保质期 · 库存 {save.yuanqiBottles ?? 0}</div>
+              </div>
+              <button
+                className="primary"
+                disabled={(save.yuanqiBottles ?? 0) < 1}
+                onClick={() => drinkYuanqi()}
+              >
+                使用
+              </button>
+            </div>
           </>
         )}
 
@@ -189,13 +292,21 @@ export default function EquipmentScene() {
                   <button className={save.lookSex === "female" ? "primary" : ""} onClick={() => setLookSex("female")}>女</button>
                 </span>
               </div>
-              <PersonView outfitId={save.equippedOutfit} sex={save.lookSex} size={96} />
-              <div className="dim">服装无属性，仅换外观；男女各一版。</div>
+              <PersonView className="outfit-preview" outfitId={save.equippedOutfit} sex={save.lookSex} size={140} />
+              <div className="dim">仅外观。男女各一版，钓感不变。</div>
             </div>
             {OUTFIT_DEFS.filter((o) => save.ownedOutfits.includes(o.id)).map((o) => (
-              <button key={o.id} className={save.equippedOutfit === o.id ? "primary" : ""} onClick={() => equipOutfit(o.id)}>
-                {o.name} · 无属性仅外观
-              </button>
+              <GoodsRow
+                key={o.id}
+                title={o.name}
+                quality={o.quality}
+                hint={o.blurb}
+                action={
+                  <button className={save.equippedOutfit === o.id ? "primary" : ""} onClick={() => equipOutfit(o.id)}>
+                    {save.equippedOutfit === o.id ? "穿着中" : "穿上"}
+                  </button>
+                }
+              />
             ))}
           </>
         )}
@@ -204,18 +315,15 @@ export default function EquipmentScene() {
           <>
             <div className="panel">
               <h2>可阅读书籍</h2>
-              <button className="primary" onClick={() => setScene("encyclopedia")}>阅读图鉴</button>
+              <button className="primary" data-guide="open-encyc" onClick={() => setScene("encyclopedia")}>阅读图鉴</button>
             </div>
             {BOOK_DEFS.filter((b) => save.ownedBooks.includes(b.id)).map((b) => (
-              <div className="panel" key={b.id}>
-                <strong>{b.name}</strong>
-                <div className="dim">{b.hint} · 持有即生效</div>
-              </div>
+              <GoodsRow key={b.id} title={b.name} hint={b.hint} />
             ))}
-            {save.ownedBooks.length === 0 && <div className="panel dim">还没有增益书籍，去商城买。</div>}
+            {save.ownedBooks.length === 0 && <EmptyHint>还没有增益书籍，去商城买。</EmptyHint>}
           </>
         )}
-      </div>
-    </div>
+      </PageBody>
+    </Page>
   );
 }

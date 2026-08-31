@@ -1,28 +1,32 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useGame } from "../store/gameStore";
 import { FISH_BY_ID } from "../data/fishDefs";
 import { QUALITY_LABEL, QUALITY_ORDER, type Quality } from "../types";
 import { qualitySortRank } from "../game/weight";
 import { FishPortrait } from "../art/Art";
-import { tankSellPrice } from "../game/economy";
+import { EmptyHint, Page, PageHead, QualityChip } from "../ui/chrome";
+import { askConfirm, useUi } from "../store/uiStore";
 
-type Tab = "list" | "sell" | "buy";
+type Tab = "sell" | "buy" | "list";
 
 export default function MarketScene() {
   const save = useGame((s) => s.save);
   const setScene = useGame((s) => s.setScene);
   const sellToMarket = useGame((s) => s.sellToMarket);
-  const sellFromTank = useGame((s) => s.sellFromTank);
-  const listFish = useGame((s) => s.listFish);
-  const listFromTank = useGame((s) => s.listFromTank);
   const unlistListing = useGame((s) => s.unlistListing);
   const buyListing = useGame((s) => s.buyListing);
-  const [tab, setTab] = useState<Tab>("list");
+  const [tab, setTab] = useState<Tab>("sell");
   const [filter, setFilter] = useState<Quality | "all">("all");
   const [query, setQuery] = useState("");
   const [applied, setApplied] = useState("");
-  const [price, setPrice] = useState<Record<string, number>>({});
   const [filterOpen, setFilterOpen] = useState(false);
+  const markGuideSellPrompted = useUi((s) => s.markGuideSellPrompted);
+  const setMarketCurrentTab = useUi((s) => s.setMarketCurrentTab);
+
+  useEffect(() => {
+    setMarketCurrentTab(tab);
+    return () => setMarketCurrentTab(null);
+  }, [tab, setMarketCurrentTab]);
 
   const searching = Boolean(applied) || filter !== "all";
 
@@ -39,14 +43,6 @@ export default function MarketScene() {
       .sort((a, b) => qualitySortRank(a.def.quality) - qualitySortRank(b.def.quality));
   }, [save.basket, filter, applied]);
 
-  const tankFish = useMemo(() => {
-    return save.tank
-      .filter((f) => !f.dead)
-      .map((f) => ({ ...f, def: FISH_BY_ID[f.defId] }))
-      .filter((f) => f.def && matchName(f.def.name, f.def.quality))
-      .sort((a, b) => qualitySortRank(a.def.quality) - qualitySortRank(b.def.quality));
-  }, [save.tank, filter, applied]);
-
   const myListings = useMemo(() => {
     return save.listings
       .filter((l) => l.source === "player")
@@ -55,32 +51,34 @@ export default function MarketScene() {
       .sort((a, b) => qualitySortRank(a.def.quality) - qualitySortRank(b.def.quality));
   }, [save.listings, filter, applied]);
 
-  const listings = useMemo(() => {
+  const shopListings = useMemo(() => {
     return save.listings
+      .filter((l) => l.source === "market")
       .map((l) => ({ ...l, def: FISH_BY_ID[l.defId] }))
       .filter((l) => l.def && matchName(l.def.name, l.def.quality))
       .sort((a, b) => qualitySortRank(a.def.quality) - qualitySortRank(b.def.quality));
   }, [save.listings, filter, applied]);
 
-  const emptyHint = tab === "buy"
-    ? "没有符合条件的商品"
-    : "筐里和缸里都没有符合条件的鱼";
+  const otherListings = useMemo(() => {
+    return save.listings
+      .filter((l) => l.source === "other")
+      .map((l) => ({ ...l, def: FISH_BY_ID[l.defId] }))
+      .filter((l) => l.def && matchName(l.def.name, l.def.quality))
+      .sort((a, b) => a.price - b.price);
+  }, [save.listings, filter, applied]);
 
   return (
-    <div className="page">
-      <div className="page-head">
-        <button onClick={() => setScene("aquarium")}>← 返回</button>
-        <h2>鱼行</h2>
-      </div>
+    <Page>
+      <PageHead onBack={() => setScene("aquarium")} title="鱼行" backGuide="back-aquarium" />
       <div className="split">
         <div className="split-left">
-          {(["list", "sell", "buy"] as Tab[]).map((t) => (
-            <button key={t} className={tab === t ? "primary" : ""} onClick={() => setTab(t)}>
+          {(["buy", "sell", "list"] as Tab[]).map((t) => (
+            <button key={t} className={tab === t ? "tab is-on" : "tab"} data-guide={t === "buy" ? "market-tab-buy" : undefined} onClick={() => setTab(t)}>
               {t === "list" ? "挂售" : t === "sell" ? "售卖" : "购买"}
             </button>
           ))}
           <p className="dim" style={{ fontSize: 11, padding: "0 4px" }}>
-            {tab === "list" ? "卖给玩家" : tab === "sell" ? "卖给鱼行" : "鱼行和玩家都有"}
+            {tab === "list" ? "正在挂出的鱼" : tab === "sell" ? "只卖鱼筐里的鱼" : "鱼行和其他钓友"}
           </p>
         </div>
         <div className="split-right">
@@ -109,127 +107,105 @@ export default function MarketScene() {
 
             {tab === "list" && (
               <>
-                <Section title="鱼筐" empty={basketFish.length === 0 && "筐里没有可挂售的鱼"}>
-                  {basketFish.map((f) => (
-                    <div className="panel market-row" key={f.uid}>
-                      <FishPortrait id={f.def.id} size={40} alt={f.def.name} />
-                      <div className="market-meta">
-                        <strong>{f.def.name}</strong>
-                        <span className={`chip ${f.def.quality}`}>{QUALITY_LABEL[f.def.quality]}</span>
-                        <span className="chip">鱼筐</span>
-                      </div>
-                      <input
-                        type="number"
-                        value={price[f.uid] ?? f.def.sellPrice}
-                        onChange={(e) => setPrice((p) => ({ ...p, [f.uid]: Number(e.target.value) }))}
-                      />
-                      <button className="primary" onClick={() => listFish(f.uid, price[f.uid] ?? f.def.sellPrice)}>挂售</button>
+                {myListings.length === 0 && <EmptyHint>您暂时未挂售鱼</EmptyHint>}
+                {myListings.map((l) => (
+                  <div className="panel market-row" key={l.uid}>
+                    <FishPortrait id={l.def.id} size={40} alt={l.def.name} />
+                    <div className="market-meta">
+                      <strong>{l.kind === "egg" ? `鱼卵（${l.def.name}）` : l.def.name}</strong>
+                      <QualityChip quality={l.def.quality} />
+                      {l.kind === "egg" && <span className="chip">鱼卵</span>}
+                      <div className="dim">{l.price}金</div>
                     </div>
-                  ))}
-                </Section>
-                <Section title="鱼缸" empty={tankFish.length === 0 && "缸里没有可挂售的鱼"}>
-                  {tankFish.map((f) => {
-                    const ask = tankSellPrice(f.def.sellPrice, f.health, false) ?? f.def.sellPrice;
-                    return (
-                    <div className="panel market-row" key={f.uid}>
-                      <FishPortrait id={f.def.id} size={40} alt={f.def.name} />
-                      <div className="market-meta">
-                        <strong>{f.def.name}</strong>
-                        <span className={`chip ${f.def.quality}`}>{QUALITY_LABEL[f.def.quality]}</span>
-                        <span className="chip">鱼缸</span>
-                        <span className="dim">健康 {f.health}</span>
-                      </div>
-                      <input
-                        type="number"
-                        value={price[f.uid] ?? ask}
-                        onChange={(e) => setPrice((p) => ({ ...p, [f.uid]: Number(e.target.value) }))}
-                      />
-                      <button className="primary" onClick={() => listFromTank(f.uid, price[f.uid] ?? ask)}>挂售</button>
-                    </div>
-                    );
-                  })}
-                </Section>
-                <Section title="我的挂售" empty={myListings.length === 0 && "还没有挂在鱼行的鱼"}>
-                  {myListings.map((l) => (
-                    <div className="panel market-row" key={l.uid}>
-                      <FishPortrait id={l.def.id} size={40} alt={l.def.name} />
-                      <div className="market-meta">
-                        <strong>{l.kind === "egg" ? `鱼卵（${l.def.name}）` : l.def.name}</strong>
-                        <span className={`chip ${l.def.quality}`}>{QUALITY_LABEL[l.def.quality]}</span>
-                        {l.kind === "egg" && <span className="chip">鱼卵</span>}
-                        <span className="chip ok">我的挂售</span>
-                        <div className="dim">{l.price}金</div>
-                      </div>
-                      <button onClick={() => unlistListing(l.uid)}>下架</button>
-                    </div>
-                  ))}
-                </Section>
+                    <button
+                      className="danger"
+                      onClick={() =>
+                        askConfirm({
+                          title: "确认撤回",
+                          message: `确定撤回「${l.kind === "egg" ? "鱼卵（" + l.def.name + "）" : l.def.name}」？${l.kind === "egg" ? "鱼卵会回到当前缸底。" : "鱼会回到鱼筐。"}`,
+                          confirmLabel: "撤回",
+                          danger: true,
+                          onConfirm: () => unlistListing(l.uid),
+                        })
+                      }
+                    >
+                      撤回
+                    </button>
+                  </div>
+                ))}
               </>
             )}
 
             {tab === "sell" && (
               <>
-                <Section title="鱼筐" empty={basketFish.length === 0 && "筐里没有可售卖的鱼"}>
-                  {basketFish.map((f) => (
-                    <div className="panel market-row" key={f.uid}>
-                      <FishPortrait id={f.def.id} size={40} alt={f.def.name} />
-                      <div className="market-meta">
-                        <strong>{f.def.name}</strong>
-                        <span className={`chip ${f.def.quality}`}>{QUALITY_LABEL[f.def.quality]}</span>
-                        <span className="chip">鱼筐</span>
-                      </div>
-                      <button className="primary" onClick={() => sellToMarket(f.uid)}>售卖 {f.def.sellPrice}金</button>
+                {basketFish.length === 0 && <EmptyHint>筐里没有可售卖的鱼</EmptyHint>}
+                {basketFish.map((f, i) => (
+                  <div className="panel market-row" key={f.uid}>
+                    <FishPortrait id={f.def.id} size={40} alt={f.def.name} />
+                    <div className="market-meta">
+                      <strong>{f.def.name}</strong>
+                      <QualityChip quality={f.def.quality} />
                     </div>
-                  ))}
-                </Section>
-                <Section title="鱼缸" empty={tankFish.length === 0 && "缸里没有可售卖的鱼"}>
-                  {tankFish.map((f) => {
-                    const ask = tankSellPrice(f.def.sellPrice, f.health, false) ?? f.def.sellPrice;
-                    return (
-                    <div className="panel market-row" key={f.uid}>
-                      <FishPortrait id={f.def.id} size={40} alt={f.def.name} />
-                      <div className="market-meta">
-                        <strong>{f.def.name}</strong>
-                        <span className={`chip ${f.def.quality}`}>{QUALITY_LABEL[f.def.quality]}</span>
-                        <span className="chip">鱼缸</span>
-                        <span className="dim">健康 {f.health}</span>
-                      </div>
-                      <button className="primary" onClick={() => sellFromTank(f.uid)}>售卖 {ask}金</button>
-                    </div>
-                    );
-                  })}
-                </Section>
+                    <button
+                      data-guide={i === 0 ? "sell-fish" : undefined}
+                      className="primary"
+                      onClick={() => {
+                        markGuideSellPrompted();
+                        askConfirm({
+                          title: "确认售卖",
+                          message: `确定把「${f.def.name}」卖给鱼行，获得 ${f.def.sellPrice} 金？卖出后无法找回。`,
+                          confirmLabel: "售卖",
+                          onConfirm: () => sellToMarket(f.uid),
+                          onCancel: () => markGuideSellPrompted(),
+                        });
+                      }}
+                    >
+                      售卖 {f.def.sellPrice}金
+                    </button>
+                  </div>
+                ))}
               </>
             )}
 
-            {tab === "buy" && listings.map((l) => {
-              const mine = l.source === "player";
-              return (
-                <div className="panel market-row" key={l.uid}>
-                  <FishPortrait id={l.def.id} size={40} alt={l.def.name} />
-                  <div className="market-meta">
-                    <strong>{l.kind === "egg" ? `鱼卵（${l.def.name}）` : l.def.name}</strong>
-                    <span className={`chip ${l.def.quality}`}>{QUALITY_LABEL[l.def.quality]}</span>
-                    {l.kind === "egg" && <span className="chip">鱼卵</span>}
-                    <span className={`chip ${mine ? "ok" : ""}`}>{mine ? "我的挂售" : "鱼行"}</span>
-                  </div>
-                  {mine ? (
-                    <button onClick={() => unlistListing(l.uid)}>下架</button>
-                  ) : (
-                    <button disabled={save.gold < l.price} onClick={() => buyListing(l.uid)}>购买 {l.price}金</button>
-                  )}
-                </div>
-              );
-            })}
-
-            {tab === "buy" && listings.length === 0 && <div className="dim" style={{ padding: 12 }}>{emptyHint}</div>}
-            {tab === "sell" && basketFish.length === 0 && tankFish.length === 0 && (
-              <div className="dim" style={{ padding: 12 }}>{emptyHint}</div>
+            {tab === "buy" && (
+              <>
+                <Section title="其他钓友" empty={otherListings.length === 0 && "暂时没有钓友挂便宜鱼"}>
+                  {otherListings.map((l) => (
+                    <div className="panel market-row" key={l.uid}>
+                      <FishPortrait id={l.def.id} size={40} alt={l.def.name} />
+                      <div className="market-meta">
+                        <strong>{l.def.name}</strong>
+                        <QualityChip quality={l.def.quality} />
+                        <span className="chip ok">钓友</span>
+                      </div>
+                      <button data-guide={l.defId === "crucian" ? "buy-crucian" : undefined} disabled={save.gold < l.price} onClick={() => buyListing(l.uid)}>
+                        购买 {l.price}金
+                      </button>
+                    </div>
+                  ))}
+                </Section>
+                <Section title="鱼行" empty={shopListings.length === 0 && "鱼行暂时没货"}>
+                  {shopListings.map((l) => (
+                    <div className="panel market-row" key={l.uid}>
+                      <FishPortrait id={l.def.id} size={40} alt={l.def.name} />
+                      <div className="market-meta">
+                        <strong>{l.kind === "egg" ? `鱼卵（${l.def.name}）` : l.def.name}</strong>
+                        <QualityChip quality={l.def.quality} />
+                        {l.kind === "egg" && <span className="chip">鱼卵</span>}
+                        <span className="chip">鱼行</span>
+                      </div>
+                      <button data-guide={l.defId === "crucian" && !otherListings.some((o) => o.defId === "crucian") ? "buy-crucian" : undefined} disabled={save.gold < l.price} onClick={() => buyListing(l.uid)}>
+                        购买 {l.price}金
+                      </button>
+                    </div>
+                  ))}
+                </Section>
+              </>
             )}
           </div>
         </div>
       </div>
-    </div>
+    </Page>
   );
 }
 

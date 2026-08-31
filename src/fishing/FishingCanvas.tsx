@@ -69,10 +69,11 @@ export default function FishingCanvas({
 
     const state = {
       fishY: 0.5,
-      playerY: 0.5,
+      playerY: 0.5, // 钓到后人物滑块从槽中间开始
       fishVel: 0,
       progress: 30,
       t: 0,
+      spawnLock: 0.35,
       hotDir: -1,
       hotHold: 0,
       hotEnd: HOT_LO,
@@ -194,8 +195,15 @@ export default function FishingCanvas({
           state.fishY = clamp01(state.fishY + state.fishVel * dt * 3);
         }
 
-        const lift = holdingRef.current ? 0.9 : -0.7;
-        state.playerY = clamp01(state.playerY + lift * mods.sensitivity * dt, 0.02, 0.98);
+        // 按住上升（Y↓）、松开下降（Y↑）；开局短暂锁在中间，方便看清初始位置
+        if (state.spawnLock > 0 && !holdingRef.current) {
+          state.spawnLock = Math.max(0, state.spawnLock - dt);
+          state.playerY = 0.5;
+        } else {
+          state.spawnLock = 0;
+          const lift = holdingRef.current ? -0.9 : 0.7;
+          state.playerY = clamp01(state.playerY + lift * mods.sensitivity * dt, 0.02, 0.98);
+        }
 
         state.trail.push(state.fishY);
         if (state.trail.length > TRAIL_N) state.trail.shift();

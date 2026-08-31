@@ -1,23 +1,32 @@
 /**
- * 存档 Schema。localStorage 单 JSON，结构按可迁移后端设计（扁平、可序列化、带版本号）。
+ * 存档 Schema。真档在游戏服务按账号分槽，结构扁平、可序列化、带版本号。
  * 术语与 CONTEXT.md 一一对应：baitStock（鱼饵）/ foodStock（鱼食）/ equipped.* / pearl / gold。
  */
 
 import type { LoveView, Personality, Quality, RodPartSlot, Sex } from "../types";
 import { QUALITY_ORDER, ROD_PART_SLOTS } from "../types";
 import { DEFAULT_REAL_MS_PER_GAME_DAY, NEWBIE_PACK_DAYS } from "../game/constants";
-import { kitPartIds, ROD_BY_ID, STARTER_PARTS } from "../data/equipmentDefs";
+import { kitPartIds, LEGACY_HANDLE_TO_ROD, PART_BY_ID, ROD_BY_ID, STARTER_PARTS } from "../data/equipmentDefs";
 import { FISH_BY_ID } from "../data/fishDefs";
 import { FISHERY_BY_ID } from "../data/fisheryDefs";
 import { CONSUMABLE_BY_ID, baitIdFromFood } from "../data/consumableDefs";
 import { parseLoveView, parsePersonality, rollTraits } from "../game/traits";
 import { sexFromUid } from "../game/sex";
-import { STARTER_TANK_CAPACITY, STARTER_TANK_ID, STARTER_TANK_SLOTS, inferQualityFromCapacity, starterTanks } from "../game/tanks";
+import { STARTER_TANK_CAPACITY, STARTER_TANK_ID, STARTER_TANK_SLOTS, inferQualityFromCapacity, migrateTankSlotIds, starterTanks, starterFish, starterEggs } from "../game/tanks";
 import { capacityForQuality } from "../data/tankDefs";
 import { ATTRACTANT_BY_ID } from "../data/attractantDefs";
+import { buildTimedQuestItems, type TimedQuestItem } from "../data/timedQuestDefs";
 import { getSessionAccount, readCurrentSaveRaw, setSessionAccount, writeCurrentSaveRaw } from "./accounts";
 
-export const SAVE_VERSION = 9;
+export const SAVE_VERSION = 21;
+
+/** 玩家自由笔记。 */
+export interface PlayerNote {
+  uid: string;
+  title: string;
+  content: string;
+  updatedAt: number;
+}
 
 export type TankDecor = "none" | "coral" | "rock" | "wood";
 
@@ -45,6 +54,16 @@ export interface TankFish {
   gestationLeft: number;
   /** 求偶香 5 分钟产卵的现实时间戳；0 表示没有。 */
   scentLayAt: number;
+  /** 这一对累计产卵次数；解配清零。 */
+  layCount: number;
+  /** 好感 0～10；满 10 可起名。 */
+  affection: number;
+  /** 玩家起的名字；null 表示未起名。 */
+  customName: string | null;
+  /** 最近一次抚摸对应的游戏天。 */
+  petDay: number;
+  /** 当天抚摸次数（每天最多 3 次，+0.1 好感/次）。 */
+  petCount: number;
 }
 
 /** 缸底鱼卵。子代随机继承某一亲本 defId，无遗传。 */
@@ -95,8 +114,26 @@ export interface DailyQuestState {
 
 export interface TimedQuestState {
   endDay: number;
-  progress: number;
-  target: number;
+  items: TimedQuestItem[];
+}
+
+export interface NewbieTaskState {
+  catchCommon: number;
+  buyRod: number;
+  swapPart: number;
+  fillTank: number;
+  buyTank: number;
+  expand: number;
+  cook: number;
+  claimed: Partial<Record<string, boolean>>;
+}
+
+/** 邮箱里的一封信。正文和附件看 defId。 */
+export interface MailItem {
+  uid: string;
+  defId: string;
+  receivedDay: number;
+  read: boolean;
   claimed: boolean;
 }
 
@@ -110,6 +147,8 @@ export interface BasketFish {
   /** 从缸放回筐时保留；新钓到的没有。 */
   health?: number;
   lastFedDay?: number;
+  affection?: number;
+  customName?: string | null;
 }
 
 /** 玩家挂售在鱼行的鱼或鱼卵。 */
@@ -117,10 +156,18 @@ export interface Listing {
   uid: string;
   defId: string;
   price: number;
-  /** 来源：玩家挂售 / 鱼行系统。 */
-  source: "player" | "market";
+  /** 来源：自己挂售 / 鱼行系统 / 其他钓友。 */
+  source: "player" | "market" | "other";
   kind: "fish" | "egg";
   parentB?: string;
+}
+
+/** 做出来的菜，保质期 3 游戏天；过期只能丢。 */
+export interface CookedDish {
+  uid: string;
+  defId: string;
+  restore: number;
+  cookedDay: number;
 }
 
 export interface EquippedSlots {
@@ -164,28 +211,56 @@ export interface SaveData {
   defaultTankId: string;
   /** 水族馆能摆下几口缸（ADR-015 缸位）。 */
   tankSlots: number;
-  /** 缸位扩建完工的游戏天；null 表示没有在建。 */
-  expandSlotReadyDay: number | null;
+  /** 每个凹槽对应的鱼缸 id；null 表示空置。 */
+  tankSlotIds: (string | null)[];
+  /** 缸位扩建完工的现实时间戳；null 表示没有在建。 */
+  expandReadyAt: number | null;
   caughtFishIds: string[];
   scene: SceneId;
   questStep: string;
+  /** 关掉界面引导后不再弹出；任务线仍在任务页。 */
+  guideSkipped: boolean;
+  /**
+   * 钓鱼行程引导相位：
+   * 0 空闲；1 馆→地图；2 地图→钓点；3 钓点→地图；4 地图→馆（待存缸）；
+   * 5 鱼筐→馆（待喂食）。
+   */
+  guideTripPhase: 0 | 1 | 2 | 3 | 4 | 5;
+  /** 开局引导买鱼粮：买过或离开商城即置真，避免重复引导。 */
+  guideShopDone: boolean;
+  /** 是否已弹过新手引导询问。未弹则进游戏先欢迎再问是否要引导。 */
+  guidePrompted: boolean;
+  /** 钓鱼成功后的挂机引导是否已完成（避免重复）。 */
+  guideIdleDone: boolean;
+  /** 吃菜后的体力提示是否已展示过（新手最后一步）。 */
+  guideStaminaHinted: boolean;
   gameDay: number;
   /** 上次按天结算时的现实时间戳；与现在比北京自然日差，决定过了几天。 */
   lastDayTickAt: number;
+  /** 游戏时速：现实 1 秒等于多少游戏秒。默认 1（实时）；>1 时按经过的现实时长 × 时速加速推进游戏天。 */
+  gameSpeed: number;
   /** 旧字段，不再参与结算。 */
   realMsPerGameDay: number;
   /** 已开始（过登录页）。 */
   started: boolean;
-  hosting: boolean;
+  /** 开启托管的缸 id；空数组表示未托管。 */
+  hostedTankIds: string[];
   /** 渔场月卡到期游戏天（含当日）。 */
   fisheryCards: Record<string, number>;
   /** 月卡到期游戏天；-1 未开通。 */
   monthlyCardUntilDay: number;
   lastMonthlyClaimDay: number;
   claimedNewbiePack: boolean;
+  claimedGearPack: boolean;
+  claimedOutfitPack: boolean;
+  claimedTankPack: boolean;
   newbiePackUntilDay: number;
   /** 欧气层数，上钩概率按 ADR-010 档位叠加。 */
   luck: number;
+  /** 正在参观的榜单钓友；不在馆内为 null。 */
+  visitNpcId: string | null;
+  /** 已从榜单馆求购或申请配偶带走的鱼 uid。 */
+  leaderTakenUids: string[];
   idle: IdleState | null;
   /** 上次进入的渔场，刷新后仍停在钓鱼点。 */
   lastFisheryId: string | null;
@@ -199,6 +274,8 @@ export interface SaveData {
   activeLoadoutId: string;
   daily: DailyQuestState;
   timed: TimedQuestState;
+  /** 新手任务（成就式，与界面引导线分离）。 */
+  newbieTasks: NewbieTaskState;
   /** 玩家等级 1～30（ADR-016）。 */
   playerLevel: number;
   playerXp: number;
@@ -211,10 +288,18 @@ export interface SaveData {
   energyDrinkStock: number;
   yuanqiBottles: number;
   yuanqiProgress: number;
+  /** 今日已吃菜次数（饱腹次数）。 */
   satietyUsed: number;
   satietyDay: number;
+  /** 上次吃菜的现实时间戳；0 表示还没吃过。两道菜间隔见 DISH_EAT_INTERVAL_MS。 */
+  lastDishAteAt: number;
   /** 上次享受「每日首次做菜 +50%」的游戏天；-1 表示还没有。 */
   firstCookDay: number;
+  mails: MailItem[];
+  /** 已投递过的系统信模板 id。 */
+  mailFlags: Record<string, boolean>;
+  dishes: CookedDish[];
+  notes: PlayerNote[];
 }
 
 export type SceneId =
@@ -231,7 +316,37 @@ export type SceneId =
   | "store_tank"
   | "sneak"
   | "leaderboard"
-  | "cook";
+  | "visit_aquarium"
+  | "cook"
+  | "mail"
+  | "notes";
+
+const SCENE_IDS: SceneId[] = [
+  "login",
+  "aquarium",
+  "fishing_map",
+  "fishing",
+  "shop",
+  "market",
+  "equipment",
+  "encyclopedia",
+  "quests",
+  "select_fish",
+  "store_tank",
+  "sneak",
+  "leaderboard",
+  "visit_aquarium",
+  "cook",
+  "mail",
+  "notes",
+];
+
+function parseScene(v: unknown, visitNpcId: string | null): SceneId {
+  if (v === "login") return "login";
+  if (v === "visit_aquarium") return visitNpcId ? "visit_aquarium" : "leaderboard";
+  if (typeof v === "string" && SCENE_IDS.includes(v as SceneId)) return v as SceneId;
+  return "aquarium";
+}
 
 const BAIT_ID_MIGRATE: Record<string, string> = {
   bait_dough: "bait_fermented_bran",
@@ -268,7 +383,71 @@ export function freshDaily(day: number): DailyQuestState {
 }
 
 export function freshTimed(day: number): TimedQuestState {
-  return { endDay: day + 7, progress: 0, target: 3, claimed: false };
+  return { endDay: day + 7, items: buildTimedQuestItems(day) };
+}
+
+export function freshNewbieTasks(): NewbieTaskState {
+  return {
+    catchCommon: 0,
+    buyRod: 0,
+    swapPart: 0,
+    fillTank: 0,
+    buyTank: 0,
+    expand: 0,
+    cook: 0,
+    claimed: {},
+  };
+}
+
+function normalizeTimed(raw: Record<string, unknown>, gameDay: number): TimedQuestState {
+  const endDay = typeof raw.endDay === "number" ? raw.endDay : gameDay + 7;
+  if (Array.isArray(raw.items) && (raw.items as unknown[]).length > 0) {
+    return {
+      endDay,
+      items: (raw.items as TimedQuestItem[]).map((it, i) => {
+        const x = asRecord(it);
+        return {
+          id: String(x.id || `tq_${i}`),
+          kind: x.kind === "species" ? "species" : "quality",
+          title: String(x.title || "限时任务"),
+          hint: String(x.hint || ""),
+          minQuality: typeof x.minQuality === "string" ? (x.minQuality as TimedQuestItem["minQuality"]) : undefined,
+          fishId: typeof x.fishId === "string" ? x.fishId : undefined,
+          progress: Number(x.progress) || 0,
+          target: Number(x.target) || 1,
+          rewardGold: Number(x.rewardGold) || 80,
+          claimed: Boolean(x.claimed),
+        };
+      }),
+    };
+  }
+  // 旧格式：单条 progress/target → 迁成多任务，保留旧进度到第一条
+  const legacyProgress = Number(raw.progress) || 0;
+  const legacyTarget = Number(raw.target) || 3;
+  const legacyClaimed = Boolean(raw.claimed);
+  const items = buildTimedQuestItems(gameDay);
+  if (items[0]) {
+    items[0].progress = Math.min(legacyTarget, legacyProgress);
+    items[0].target = legacyTarget;
+    items[0].claimed = legacyClaimed;
+  }
+  return { endDay, items };
+}
+
+function normalizeNewbieTasks(raw: unknown): NewbieTaskState {
+  const base = freshNewbieTasks();
+  if (!raw || typeof raw !== "object") return base;
+  const q = asRecord(raw);
+  return {
+    catchCommon: Number(q.catchCommon) || 0,
+    buyRod: Number(q.buyRod) || 0,
+    swapPart: Number(q.swapPart) || 0,
+    fillTank: Number(q.fillTank) || 0,
+    buyTank: Number(q.buyTank) || 0,
+    expand: Number(q.expand) || 0,
+    cook: Number(q.cook) || 0,
+    claimed: q.claimed && typeof q.claimed === "object" ? { ...(q.claimed as Record<string, boolean>) } : {},
+  };
 }
 
 function defaultLoadout(
@@ -292,12 +471,38 @@ function defaultLoadout(
 }
 
 function collectOwnedParts(ownedRods: string[], extra: string[]): string[] {
-  const set = new Set(extra);
-  for (const id of ROD_PART_SLOTS) set.add(STARTER_PARTS[id]);
+  const set = new Set<string>();
+  for (const id of extra) {
+    if (LEGACY_HANDLE_TO_ROD[id]) continue;
+    if (PART_BY_ID[id]) set.add(id);
+  }
+  for (const slot of ROD_PART_SLOTS) set.add(STARTER_PARTS[slot]);
   for (const rodId of ownedRods) {
     for (const pid of kitPartIds(rodId)) set.add(pid);
   }
   return [...set];
+}
+
+function rodsFromLegacyHandles(extra: string[], ownedRods: string[]): string[] {
+  const set = new Set(ownedRods.filter((id) => Boolean(ROD_BY_ID[id])));
+  if (set.size === 0) set.add("rod_bamboo");
+  for (const id of extra) {
+    const rodId = LEGACY_HANDLE_TO_ROD[id];
+    if (rodId && ROD_BY_ID[rodId]) set.add(rodId);
+  }
+  return [...set];
+}
+
+function pickLoadoutParts(
+  fallback: Record<RodPartSlot, string>,
+  raw: Record<string, unknown>,
+): Record<RodPartSlot, string> {
+  const next = { ...fallback };
+  for (const slot of ROD_PART_SLOTS) {
+    const id = typeof raw[slot] === "string" ? String(raw[slot]) : fallback[slot];
+    next[slot] = PART_BY_ID[id] && PART_BY_ID[id].slot === slot ? id : fallback[slot];
+  }
+  return next;
 }
 
 function parseDecor(value: unknown): TankDecor {
@@ -342,6 +547,27 @@ function fillMissingGestation(tank: TankFish[]): void {
   }
 }
 
+/** 旧存档没有 layCount 时，用缸底同对鱼卵数补上，并让双方次数对齐。 */
+function syncPairLayCounts(tank: TankFish[], eggs: TankEgg[]): void {
+  const fromEggs = new Map<string, number>();
+  for (const e of eggs) {
+    if (!e.pairId) continue;
+    fromEggs.set(e.pairId, (fromEggs.get(e.pairId) ?? 0) + 1);
+  }
+  const byPair = new Map<string, TankFish[]>();
+  for (const f of tank) {
+    if (!f.pairId) continue;
+    const arr = byPair.get(f.pairId) ?? [];
+    arr.push(f);
+    byPair.set(f.pairId, arr);
+  }
+  for (const [pid, arr] of byPair) {
+    let n = fromEggs.get(pid) ?? 0;
+    for (const f of arr) n = Math.max(n, f.layCount ?? 0);
+    for (const f of arr) f.layCount = n;
+  }
+}
+
 function migrateParts(
   d: Record<string, unknown>,
   ownedRods: string[],
@@ -366,8 +592,12 @@ function migrate(raw: unknown): SaveData | null {
   const equipped = asRecord(d.equipped);
   const tankRaw = Array.isArray(d.tank) ? d.tank : [];
   const listingsRaw = Array.isArray(d.listings) ? d.listings : [];
-  const ownedRods = Array.isArray(d.ownedRods) ? (d.ownedRods as string[]) : ["rod_bamboo"];
-  const equippedRod = String(equipped.rod ?? "rod_bamboo");
+  const extraParts = Array.isArray(d.ownedParts) ? (d.ownedParts as string[]) : [];
+  const ownedRods = rodsFromLegacyHandles(
+    extraParts,
+    Array.isArray(d.ownedRods) ? (d.ownedRods as string[]) : ["rod_bamboo"],
+  );
+  const equippedRod = ROD_BY_ID[String(equipped.rod ?? "rod_bamboo")] ? String(equipped.rod ?? "rod_bamboo") : "rod_bamboo";
   const { ownedParts, equippedParts } = migrateParts(d, ownedRods, equippedRod);
 
   const tanksRaw = Array.isArray(d.tanks) ? d.tanks : starterTanks();
@@ -395,6 +625,11 @@ function migrate(raw: unknown): SaveData | null {
     const x = asRecord(t);
     return typeof x.expandReadyDay === "number" ? x.expandReadyDay : day;
   }, typeof d.expandSlotReadyDay === "number" ? Number(d.expandSlotReadyDay) : null);
+
+  const visitNpcId = typeof d.visitNpcId === "string" && d.visitNpcId ? String(d.visitNpcId) : null;
+  const leaderTakenUids = Array.isArray(d.leaderTakenUids)
+    ? (d.leaderTakenUids as unknown[]).filter((x): x is string => typeof x === "string")
+    : [];
 
   const base: SaveData = {
     version: SAVE_VERSION,
@@ -439,6 +674,14 @@ function migrate(raw: unknown): SaveData | null {
         loveView: parseLoveView(tf.loveView) ?? traits.loveView,
         gestationLeft: typeof tf.gestationLeft === "number" ? tf.gestationLeft : 0,
         scentLayAt: typeof tf.scentLayAt === "number" ? tf.scentLayAt : 0,
+        layCount: typeof tf.layCount === "number" ? Math.max(0, Math.floor(tf.layCount)) : 0,
+        affection: typeof tf.affection === "number" ? Math.min(10, Math.max(0, tf.affection)) : 0,
+        customName:
+          typeof tf.customName === "string" && tf.customName.trim()
+            ? tf.customName.trim().slice(0, 8)
+            : null,
+        petDay: typeof tf.petDay === "number" ? tf.petDay : -1,
+        petCount: typeof tf.petCount === "number" ? Math.max(0, Math.min(3, Math.floor(tf.petCount))) : 0,
       };
     }),
     basket: Array.isArray(d.basket)
@@ -462,7 +705,7 @@ function migrate(raw: unknown): SaveData | null {
         uid: String(x.uid),
         defId: String(x.defId),
         price: Number(x.price) || 0,
-        source: x.source === "market" ? "market" : "player",
+        source: x.source === "market" ? "market" : x.source === "other" ? "other" : "player",
         kind: x.kind === "egg" ? "egg" : "fish",
         parentB: typeof x.parentB === "string" ? x.parentB : undefined,
       };
@@ -486,21 +729,70 @@ function migrate(raw: unknown): SaveData | null {
     activeTankId: typeof d.activeTankId === "string" ? String(d.activeTankId) : firstTank,
     defaultTankId: typeof d.defaultTankId === "string" ? String(d.defaultTankId) : firstTank,
     tankSlots: Math.max(STARTER_TANK_SLOTS, Number(d.tankSlots) || tanks.length, tanks.length),
-    expandSlotReadyDay: pendingExpand,
+    tankSlotIds: migrateTankSlotIds(tanks, Math.max(STARTER_TANK_SLOTS, Number(d.tankSlots) || tanks.length, tanks.length), d.tankSlotIds),
+    expandReadyAt: (() => {
+      if (typeof d.expandReadyAt === "number") return d.expandReadyAt;
+      if (pendingExpand != null || typeof d.expandSlotReadyDay === "number") return Date.now();
+      return null;
+    })(),
     caughtFishIds: Array.isArray(d.caughtFishIds) ? (d.caughtFishIds as string[]) : [],
-    scene: (d.scene as SceneId) === "login" ? "login" : ((d.scene as SceneId) ?? "aquarium"),
+    scene: parseScene(d.scene, visitNpcId),
     questStep: typeof d.questStep === "string" ? d.questStep : "q_go_fish",
+    guideSkipped: d.guideSkipped === true,
+    guideTripPhase: (() => {
+      const raw = Number(d.guideTripPhase);
+      if (raw === 1 || raw === 2 || raw === 3 || raw === 4 || raw === 5) return raw;
+      // 旧存档：guidePendingStore / 待存缸任务 → 视为已回程
+      if (d.guidePendingStore === true) {
+        return parseScene(d.scene, null) === "aquarium" ? 4 : 3;
+      }
+      const basket = Array.isArray(d.basket) ? (d.basket as unknown[]) : [];
+      const step = typeof d.questStep === "string" ? d.questStep : "q_go_fish";
+      if (step === "q_tank" && basket.length > 0) {
+        return parseScene(d.scene, null) === "aquarium" ? 4 : 3;
+      }
+      return 0;
+    })(),
+    guideShopDone: d.guideShopDone === true,
+    guidePrompted: (() => {
+      if (d.guidePrompted === true) return true;
+      // 老存档已有进度：视为已弹过，不再强弹欢迎
+      const caught = Array.isArray(d.caughtFishIds) ? (d.caughtFishIds as unknown[]).length : 0;
+      const day = Number(d.gameDay) || 0;
+      const step = typeof d.questStep === "string" ? d.questStep : "q_go_fish";
+      return caught > 0 || day > 0 || step === "q_done";
+    })(),
+    guideIdleDone: (() => {
+      if (d.guideIdleDone === true) return true;
+      const caught = Array.isArray(d.caughtFishIds) ? (d.caughtFishIds as unknown[]).length : 0;
+      const day = Number(d.gameDay) || 0;
+      const step = typeof d.questStep === "string" ? d.questStep : "q_go_fish";
+      return caught > 0 || day > 0 || step === "q_done";
+    })(),
+    guideStaminaHinted: d.guideStaminaHinted === true,
     gameDay: Number(d.gameDay) || 0,
     lastDayTickAt: Number(d.lastDayTickAt) || Date.now(),
+    gameSpeed: Number(d.gameSpeed) > 0 ? Number(d.gameSpeed) : 1,
     realMsPerGameDay: Number(d.realMsPerGameDay) || DEFAULT_REAL_MS_PER_GAME_DAY,
     started: d.started === true || (d.version === 1 && d.scene !== "login"),
-    hosting: Boolean(d.hosting),
+    hostedTankIds: (() => {
+      if (Array.isArray(d.hostedTankIds)) {
+        return (d.hostedTankIds as string[]).filter((id) => tanks.some((t) => t.id === id));
+      }
+      if (Boolean(d.hosting)) return tanks.map((t) => t.id);
+      return [];
+    })(),
     fisheryCards: (d.fisheryCards as Record<string, number>) ?? {},
     monthlyCardUntilDay: typeof d.monthlyCardUntilDay === "number" ? d.monthlyCardUntilDay : -1,
     lastMonthlyClaimDay: typeof d.lastMonthlyClaimDay === "number" ? d.lastMonthlyClaimDay : -1,
     claimedNewbiePack: Boolean(d.claimedNewbiePack),
+    claimedGearPack: Boolean(d.claimedGearPack),
+    claimedOutfitPack: Boolean(d.claimedOutfitPack),
+    claimedTankPack: Boolean(d.claimedTankPack),
     newbiePackUntilDay: typeof d.newbiePackUntilDay === "number" ? d.newbiePackUntilDay : NEWBIE_PACK_DAYS,
     luck: Number(d.luck) || 0,
+    visitNpcId,
+    leaderTakenUids,
     idle: (d.idle as IdleState | null) ?? null,
     lastFisheryId: typeof d.lastFisheryId === "string" ? d.lastFisheryId : (d.idle as IdleState | null)?.fisheryId ?? null,
     playerName: typeof d.playerName === "string" ? d.playerName : "",
@@ -512,6 +804,7 @@ function migrate(raw: unknown): SaveData | null {
     activeLoadoutId: "loadout_default",
     daily: freshDaily(Number(d.gameDay) || 0),
     timed: freshTimed(Number(d.gameDay) || 0),
+    newbieTasks: freshNewbieTasks(),
     playerLevel: Math.min(30, Math.max(1, Number(d.playerLevel) || 1)),
     playerXp: Math.max(0, Number(d.playerXp) || 0),
     stamina: 100,
@@ -520,9 +813,45 @@ function migrate(raw: unknown): SaveData | null {
     energyDrinkStock: Math.max(0, Number(d.energyDrinkStock) || 0),
     yuanqiBottles: Math.min(3, Math.max(0, Number(d.yuanqiBottles) || 0)),
     yuanqiProgress: Math.max(0, Number(d.yuanqiProgress) || 0),
-    satietyUsed: Math.max(0, Number(d.satietyUsed) || 0),
+    satietyUsed: Number(d.version) >= 12 ? Math.max(0, Number(d.satietyUsed) || 0) : 0,
     satietyDay: typeof d.satietyDay === "number" ? d.satietyDay : Number(d.gameDay) || 0,
+    lastDishAteAt: Number(d.version) >= 12 ? Math.max(0, Number(d.lastDishAteAt) || 0) : 0,
     firstCookDay: typeof d.firstCookDay === "number" ? d.firstCookDay : -1,
+    mails: Array.isArray(d.mails)
+      ? (d.mails as unknown[]).map((m) => {
+          const x = asRecord(m);
+          return {
+            uid: String(x.uid),
+            defId: String(x.defId),
+            receivedDay: Number(x.receivedDay) || 0,
+            read: Boolean(x.read),
+            claimed: Boolean(x.claimed),
+          };
+        }).filter((m) => m.uid && m.defId)
+      : [],
+    mailFlags: asRecord(d.mailFlags) as Record<string, boolean>,
+    dishes: Array.isArray(d.dishes)
+      ? (d.dishes as unknown[]).map((x) => {
+          const r = asRecord(x);
+          return {
+            uid: String(r.uid),
+            defId: String(r.defId),
+            restore: Math.max(1, Number(r.restore) || 1),
+            cookedDay: Number(r.cookedDay) || 0,
+          };
+        }).filter((x) => x.uid && x.defId)
+      : [],
+    notes: Array.isArray(d.notes)
+      ? (d.notes as unknown[]).map((x) => {
+          const r = asRecord(x);
+          return {
+            uid: String(r.uid),
+            title: typeof r.title === "string" ? r.title : "",
+            content: typeof r.content === "string" ? r.content : "",
+            updatedAt: typeof r.updatedAt === "number" ? r.updatedAt : Date.now(),
+          };
+        }).filter((n) => n.uid)
+      : [],
   };
 
   const lv = base.playerLevel;
@@ -543,14 +872,9 @@ function migrate(raw: unknown): SaveData | null {
     };
   }
   if (d.timed && typeof d.timed === "object") {
-    const q = asRecord(d.timed);
-    base.timed = {
-      endDay: typeof q.endDay === "number" ? q.endDay : gameDay + 7,
-      progress: Number(q.progress) || 0,
-      target: Number(q.target) || 3,
-      claimed: Boolean(q.claimed),
-    };
+    base.timed = normalizeTimed(asRecord(d.timed), gameDay);
   }
+  base.newbieTasks = normalizeNewbieTasks(d.newbieTasks);
   if (Array.isArray(d.loadouts) && (d.loadouts as unknown[]).length > 0) {
     base.loadouts = (d.loadouts as TripLoadout[]).map((l, i) => {
       const x = asRecord(l);
@@ -562,7 +886,7 @@ function migrate(raw: unknown): SaveData | null {
         baitIds: Array.isArray(x.baitIds) ? (x.baitIds as string[]).map(remapBaitId) : [...base.equippedBaitIds],
         stool: String(x.stool || base.equipped.stool),
         basket: String(x.basket || base.equipped.basket),
-        parts: { ...base.equippedParts, ...(asRecord(x.parts) as Record<RodPartSlot, string>) },
+        parts: pickLoadoutParts(base.equippedParts, asRecord(x.parts)),
         outfitId: typeof x.outfitId === "string" ? x.outfitId : base.equippedOutfit,
       };
     });
@@ -589,6 +913,8 @@ function migrate(raw: unknown): SaveData | null {
   base.tank = base.tank.filter((f) => Boolean(FISH_BY_ID[f.defId]));
   base.basket = base.basket.filter((b) => Boolean(FISH_BY_ID[b.defId]));
   base.listings = base.listings.filter((l) => l.kind === "egg" || Boolean(FISH_BY_ID[l.defId]));
+  base.listings = mergeOtherListings(base.listings);
+  base.dishes = (base.dishes ?? []).filter((x) => Boolean(FISH_BY_ID[x.defId]));
   base.eggs = base.eggs.filter((e) => Boolean(FISH_BY_ID[e.parentA]) && Boolean(FISH_BY_ID[e.parentB]));
   base.caughtFishIds = base.caughtFishIds.filter((id) => Boolean(FISH_BY_ID[id]));
   base.baitStock = Object.fromEntries(
@@ -605,6 +931,7 @@ function migrate(raw: unknown): SaveData | null {
   base.equippedBaitIds = base.equippedBaitIds.filter((id) => Boolean(CONSUMABLE_BY_ID[id]));
   if (base.equippedBaitIds.length === 0) base.equippedBaitIds = ["bait_basic"];
   fillMissingGestation(base.tank);
+  syncPairLayCounts(base.tank, base.eggs);
   if (!base.tanks.some((t) => t.id === base.activeTankId)) base.activeTankId = firstTank;
   if (!base.tanks.some((t) => t.id === base.defaultTankId)) base.defaultTankId = firstTank;
   const tankCap = Math.max(
@@ -621,10 +948,7 @@ export function loadSave(): SaveData | null {
     const acc = getSessionAccount();
     if (!acc) return null;
     const raw = readCurrentSaveRaw();
-    if (raw == null) {
-      setSessionAccount(null);
-      return null;
-    }
+    if (raw == null) return null;
     return migrate(raw);
   } catch {
     return null;
@@ -651,17 +975,32 @@ export function clearSave(): void {
   setSessionAccount(null);
 }
 
-/** 几乎没玩过的新档：可以把旧单槽并进来。 */
+/** 几乎没玩过的新档：可以把旧单槽并进来。新档自带起始鱼/卵，故只看是否仅含起始资产。 */
 export function saveLooksUnused(save: SaveData): boolean {
+  if (save.gold > 50 || save.pearl !== 0) return false;
+  if (save.basket.length !== 0 || save.caughtFishIds.length !== 0 || save.gameDay > 1) return false;
+  const starterFishUids = new Set(starterFish().map((f) => f.uid));
+  const starterEggUids = new Set(starterEggs().map((e) => e.uid));
+  if (save.tank.length > starterFishUids.size) return false;
+  if (save.eggs.length > starterEggUids.size) return false;
   return (
-    save.gold <= 50 &&
-    save.pearl === 0 &&
-    save.tank.length === 0 &&
-    save.basket.length === 0 &&
-    save.eggs.length === 0 &&
-    save.caughtFishIds.length === 0 &&
-    save.gameDay <= 1
+    save.tank.every((f) => starterFishUids.has(f.uid)) &&
+    save.eggs.every((e) => starterEggUids.has(e.uid))
   );
+}
+
+/** 未迁移的生数据是否已经有进度。用来拦住空档把旧号盖掉。 */
+export function rawSaveLooksRich(raw: unknown): boolean {
+  if (!raw || typeof raw !== "object") return false;
+  const d = raw as Record<string, unknown>;
+  const gold = Number(d.gold) || 0;
+  const pearl = Number(d.pearl) || 0;
+  const tank = Array.isArray(d.tank) ? d.tank.length : 0;
+  const basket = Array.isArray(d.basket) ? d.basket.length : 0;
+  const eggs = Array.isArray(d.eggs) ? d.eggs.length : 0;
+  const caught = Array.isArray(d.caughtFishIds) ? d.caughtFishIds.length : 0;
+  const day = Number(d.gameDay) || 0;
+  return gold > 50 || pearl > 0 || tank > 0 || basket > 0 || eggs > 0 || caught > 0 || day > 1;
 }
 
 export function createNewSave(): SaveData {
@@ -690,29 +1029,42 @@ export function createNewSave(): SaveData {
       stool: "stool_wood",
       basket: "basket_small",
     },
-    tank: [],
+    tank: starterFish(),
     basket: [],
     listings: seedMarketListings(),
-    eggs: [],
+    eggs: starterEggs(),
     tanks,
     activeTankId: STARTER_TANK_ID,
     defaultTankId: STARTER_TANK_ID,
     tankSlots: STARTER_TANK_SLOTS,
-    expandSlotReadyDay: null,
+    tankSlotIds: [STARTER_TANK_ID],
+    expandReadyAt: null,
     caughtFishIds: [],
     scene: "login",
-    questStep: "q_go_fish",
+    questStep: "q_feed",
+    guideSkipped: false,
+    guideTripPhase: 0,
+    guideShopDone: false,
+    guidePrompted: false,
+    guideIdleDone: false,
+    guideStaminaHinted: false,
     gameDay: 0,
     lastDayTickAt: now,
+    gameSpeed: 1,
     realMsPerGameDay: DEFAULT_REAL_MS_PER_GAME_DAY,
     started: false,
-    hosting: false,
+    hostedTankIds: [],
     fisheryCards: {},
     monthlyCardUntilDay: -1,
     lastMonthlyClaimDay: -1,
     claimedNewbiePack: false,
+    claimedGearPack: false,
+    claimedOutfitPack: false,
+    claimedTankPack: false,
     newbiePackUntilDay: NEWBIE_PACK_DAYS,
     luck: 0,
+    visitNpcId: null,
+    leaderTakenUids: [],
     idle: null,
     lastFisheryId: null,
     playerName: "",
@@ -736,6 +1088,7 @@ export function createNewSave(): SaveData {
     activeLoadoutId: "loadout_default",
     daily: freshDaily(0),
     timed: freshTimed(0),
+    newbieTasks: freshNewbieTasks(),
     playerLevel: 1,
     playerXp: 0,
     stamina: 100,
@@ -746,7 +1099,12 @@ export function createNewSave(): SaveData {
     yuanqiProgress: 0,
     satietyUsed: 0,
     satietyDay: 0,
+    lastDishAteAt: 0,
     firstCookDay: -1,
+    mails: [],
+    mailFlags: {},
+    dishes: [],
+    notes: [],
   };
 }
 
@@ -761,7 +1119,27 @@ export function seedMarketListings(): Listing[] {
     { uid: "sys_dragon_eye", defId: "dragon_eye", price: 120, source: "market", kind: "fish" },
     { uid: "sys_gold_trout", defId: "gold_trout", price: 130, source: "market", kind: "fish" },
     { uid: "sys_emerald", defId: "emerald", price: 140, source: "market", kind: "fish" },
+    ...seedOtherPlayerListings(),
   ];
+}
+
+/** 其他钓友挂的便宜鱼，比鱼行系统价低一截。 */
+export function seedOtherPlayerListings(): Listing[] {
+  return [
+    { uid: "oth_crucian", defId: "crucian", price: 3, source: "other", kind: "fish" },
+    { uid: "oth_puffer", defId: "puffer", price: 3, source: "other", kind: "fish" },
+    { uid: "oth_minnow", defId: "minnow", price: 5, source: "other", kind: "fish" },
+    { uid: "oth_koi", defId: "koi_red_white", price: 18, source: "other", kind: "fish" },
+    { uid: "oth_snakehead", defId: "snakehead", price: 20, source: "other", kind: "fish" },
+    { uid: "oth_stone_bass", defId: "stone_bass", price: 22, source: "other", kind: "fish" },
+    { uid: "oth_gold_trout", defId: "gold_trout", price: 85, source: "other", kind: "fish" },
+  ];
+}
+
+function mergeOtherListings(listings: Listing[]): Listing[] {
+  const have = new Set(listings.map((l) => l.uid));
+  const extra = seedOtherPlayerListings().filter((l) => !have.has(l.uid));
+  return extra.length ? [...listings, ...extra] : listings;
 }
 
 /** 按品质给鱼食 id（喂食时拒食判定用）。 */

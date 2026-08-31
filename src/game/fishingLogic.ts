@@ -1,7 +1,14 @@
 import { QUALITY_ORDER, QUALITY_TIER_RATE, type FishDef, type Quality } from "../types";
 import { FISH_BY_ID } from "../data/fishDefs";
-import { CONSUMABLE_BY_ID } from "../data/consumableDefs";
+import { CONSUMABLE_BY_ID, fishPrefersBait, foodIdFromBait } from "../data/consumableDefs";
 import { BASKET_BY_ID } from "../data/equipmentDefs";
+import {
+  JUNK_BITE_CHANCE,
+  pickBottleStory,
+  pickJunkDef,
+  type BottleStory,
+  type JunkDef,
+} from "../data/junkDefs";
 import type { SaveData } from "../save/saveSchema";
 import type { LoveView, Personality } from "../types";
 import { basketWeightKg, fishWeightKg } from "./weight";
@@ -28,7 +35,7 @@ export function pickFishFromPool(
     let extra = 0;
     const rate = QUALITY_TIER_RATE[fish.quality];
     if (bait && bait.quality === fish.quality) extra += rate;
-    if (bait && fish.preferredBaitId === baitId) extra += rate;
+    if (bait && fishPrefersBait(fish.id, baitId)) extra += rate;
     extra += Math.max(0, luck) * rate;
     return [{ fish, w: p.weight + extra * baseTotal }];
   });
@@ -40,6 +47,36 @@ export function pickFishFromPool(
     if (r <= 0) return x.fish;
   }
   return weighted[0].fish;
+}
+
+export type BiteOutcome =
+  | { kind: "fish"; fish: FishDef }
+  | { kind: "junk"; junk: JunkDef };
+
+let lastBiteWasJunk = false;
+
+export function pickBiteOutcome(
+  pool: { fishId: string; weight: number }[],
+  baitId: string,
+  luck: number,
+): BiteOutcome {
+  const rollJunk = !lastBiteWasJunk && Math.random() < JUNK_BITE_CHANCE;
+  if (rollJunk) {
+    lastBiteWasJunk = true;
+    return { kind: "junk", junk: pickJunkDef() };
+  }
+  lastBiteWasJunk = false;
+  return { kind: "fish", fish: pickFishFromPool(pool, baitId, luck) };
+}
+
+/** 塑料袋丢掉；水草进普通鱼食；漂流瓶只带回故事。 */
+export function applyJunkToSave(save: SaveData, junk: JunkDef): BottleStory | null {
+  if (junk.kind === "weed") {
+    const foodId = foodIdFromBait("bait_basic");
+    save.foodStock = { ...save.foodStock, [foodId]: (save.foodStock[foodId] ?? 0) + 1 };
+  }
+  if (junk.kind === "bottle") return pickBottleStory();
+  return null;
 }
 
 export function qualityRank(q: Quality): number {
@@ -60,10 +97,20 @@ function basketCaps(save: SaveData) {
   return { cap: basket?.capacity ?? 10, wCap: basket?.weightCap ?? 8 };
 }
 
-export function basketFits(save: SaveData, fishDef: FishDef): boolean {
+export function basketRejectReason(save: SaveData, fishDef: FishDef): string | null {
   const { cap, wCap } = basketCaps(save);
+  const used = save.basket.length;
+  const usedW = basketWeightKg(save.basket);
   const nextW = fishWeightKg(fishDef);
-  return save.basket.length < cap && basketWeightKg(save.basket) + nextW <= wCap + 1e-6;
+  if (used >= cap) return `鱼筐满了（${used}/${cap} 条），先卖掉或存进缸`;
+  if (usedW + nextW > wCap + 1e-6) {
+    return `再放这条会超重（${usedW.toFixed(1)}+${nextW.toFixed(1)}>${wCap} 公斤），先腾地方或换更大的筐`;
+  }
+  return null;
+}
+
+export function basketFits(save: SaveData, fishDef: FishDef): boolean {
+  return basketRejectReason(save, fishDef) == null;
 }
 
 export function addToBasket(

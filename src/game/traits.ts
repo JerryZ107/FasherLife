@@ -1,7 +1,13 @@
-import { LOVE_VIEWS, PERSONALITIES, type LoveView, type Personality } from "../types";
+import { LOVE_VIEWS, PERSONALITIES, PERSONALITY_WEIGHT, type LoveView, type Personality } from "../types";
 
 export function rollPersonality(): Personality {
-  return PERSONALITIES[Math.floor(Math.random() * PERSONALITIES.length)] ?? "docile";
+  const total = PERSONALITIES.reduce((s, id) => s + PERSONALITY_WEIGHT[id], 0);
+  let r = Math.random() * total;
+  for (const id of PERSONALITIES) {
+    r -= PERSONALITY_WEIGHT[id];
+    if (r < 0) return id;
+  }
+  return "docile";
 }
 
 export function rollLoveView(): LoveView {

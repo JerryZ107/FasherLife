@@ -5,7 +5,6 @@ import { useUi } from "../store/uiStore";
 export default function AdScene() {
   const adJob = useUi((s) => s.adJob);
   const closeAd = useUi((s) => s.closeAd);
-  const accelerateExpand = useGame((s) => s.accelerateExpand);
   const accelerateEgg = useGame((s) => s.accelerateEgg);
 
   function finish() {
@@ -13,15 +12,14 @@ export default function AdScene() {
       closeAd();
       return;
     }
-    if (adJob.kind === "expand") accelerateExpand("ad");
-    else accelerateEgg(adJob.uid, "ad");
+    accelerateEgg(adJob.uid, "ad");
     closeAd();
   }
 
   return (
     <div className="placeholder ad-page">
       <div className="ad-page-label">这是广告</div>
-      <p className="dim">演示用广告页，看完即可加速扩建或孵化。</p>
+      <p className="dim">看完可加速孵化。</p>
       <button className="primary" onClick={finish}>看完了</button>
       <button onClick={closeAd}>关闭</button>
     </div>

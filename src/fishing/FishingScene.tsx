@@ -4,33 +4,42 @@ import { FISHERY_BY_ID } from "../data/fisheryDefs";
 import { CONSUMABLE_BY_ID } from "../data/consumableDefs";
 import { BASKET_BY_ID } from "../data/equipmentDefs";
 import { FISH_BY_ID } from "../data/fishDefs";
-import { QUALITY_LABEL, type FishDef, type Personality } from "../types";
-import { resolvedGear } from "../game/gear";
+import { type BottleStory, type JunkDef } from "../data/junkDefs";
+import { type FishDef, type Personality } from "../types";
+import { resolvedGear, biteReactMs } from "../game/gear";
 import { basketWeightKg } from "../game/weight";
 import { replaceWouldFit } from "../game/fishingLogic";
-import { useUi } from "../store/uiStore";
+import { askConfirm, useUi } from "../store/uiStore";
 import FishingCanvas from "./FishingCanvas";
 import { playBiteCue } from "./biteCue";
-import { FishPortrait, GearIcon } from "../art/Art";
+import { FishPortrait, GearIcon, JunkMark } from "../art/Art";
 import { FISHING_SPOTS, initialNeighbors, tickNeighbors, type NeighborState } from "./neighbors";
 import DockWorld, { panToSpotX, worldWidthPx, type Phase } from "./DockWorld";
 import { rollPersonality } from "../game/traits";
+import { QualityChip } from "../ui/chrome";
+
+/** 挂机一轮：等鱼 + 搏斗 + 飞入，对齐 IDLE_MS_PER_CAST（10s）。 */
+const IDLE_WAIT_MS = 6400;
+const IDLE_FIGHT_MS = 2400;
+const IDLE_CATCH_MS = 1200;
 
 export default function FishingScene() {
   const save = useGame((s) => s.save);
   const setScene = useGame((s) => s.setScene);
   const catchFish = useGame((s) => s.catchFish);
-  const releaseBasket = useGame((s) => s.releaseBasket);
   const replaceBasketCatch = useGame((s) => s.replaceBasketCatch);
   const consumeBait = useGame((s) => s.consumeBait);
-  const pickBiteFish = useGame((s) => s.pickBiteFish);
+  const pickBite = useGame((s) => s.pickBite);
+  const applyJunkCatch = useGame((s) => s.applyJunkCatch);
   const startIdle = useGame((s) => s.startIdle);
   const stopIdle = useGame((s) => s.stopIdle);
   const equip = useGame((s) => s.equip);
   const fisheryId = useGame((s) => s.selectedFisheryId);
+  const setDockGuide = useUi((s) => s.setDockGuide);
 
   const idle = save.idle;
-  const [phase, setPhase] = useState<Phase>(() => (idle ? "ready" : "pick"));
+  const idleOn = Boolean(idle);
+  const [phase, setPhase] = useState<Phase>(() => (idle ? "waiting" : "pick"));
   const [spot, setSpot] = useState<string | null>(() => (idle ? "s2" : null));
   const [neighbors, setNeighbors] = useState<NeighborState[]>(initialNeighbors);
   const [showBasket, setShowBasket] = useState(false);
@@ -38,9 +47,11 @@ export default function FishingScene() {
   const [pickingReplace, setPickingReplace] = useState(false);
   const [result, setResult] = useState<{
     escaped: boolean;
-    bag?: "added" | "replaced" | "full";
+    bag?: "added" | "replaced" | "full" | "rejected";
     fishId?: string;
     fishName?: string;
+    junk?: JunkDef;
+    story?: BottleStory;
   } | null>(null);
   const [fightFish, setFightFish] = useState<FishDef | null>(null);
   const [fightPersonality, setFightPersonality] = useState<Personality>("docile");
@@ -48,6 +59,7 @@ export default function FishingScene() {
   const [holding, setHolding] = useState(false);
   const [pan, setPan] = useState(0);
   const [snapping, setSnapping] = useState(false);
+  const [leaveGuideAfterCatch, setLeaveGuideAfterCatch] = useState(false);
 
   const [castPower, setCastPower] = useState(0.55);
   const [chargePower, setChargePower] = useState(0);
@@ -55,6 +67,8 @@ export default function FishingScene() {
   const reactionTimerRef = useRef<number | null>(null);
   const castTimerRef = useRef<number | null>(null);
   const reelTimerRef = useRef<number | null>(null);
+  const idleAnimRef = useRef(false);
+  const storyCloseRef = useRef<(() => void) | null>(null);
   const drag = useRef<{ x: number; y: number; pan: number; moved: boolean } | null>(null);
   const viewRef = useRef<HTMLDivElement>(null);
 
@@ -62,13 +76,30 @@ export default function FishingScene() {
   const baitCount = save.baitStock[save.equipped.bait] ?? 0;
   const basket = BASKET_BY_ID[save.equipped.basket];
   const mods = useMemo(
-    () => resolvedGear(save.equippedParts, save.equipped.stool, save.ownedBooks),
-    [save.equippedParts, save.equipped.stool, save.ownedBooks],
+    () => resolvedGear(save.equipped.rod, save.equippedParts, save.equipped.stool, save.ownedBooks),
+    [save.equipped.rod, save.equippedParts, save.equipped.stool, save.ownedBooks],
   );
   const trip = save.equippedBaitIds ?? [save.equipped.bait];
   const bw = basketWeightKg(save.basket);
   const panLocked = phase === "minigame";
-  const biteWindowMs = Math.max(3200, mods.reactionWindow + 1800);
+  const dockBusy =
+    phase === "minigame" ||
+    phase === "casting" ||
+    phase === "reeling" ||
+    phase === "bite" ||
+    phase === "idle_fight";
+  const biteWindowMs = biteReactMs(mods.reactionWindow);
+
+  useEffect(() => {
+    const caught = phase === "result" && Boolean(result && !result.escaped && result.fishId);
+    const catchPopupOpen =
+      phase === "result" &&
+      !idleOn &&
+      Boolean(result && !result.escaped && result.fishId && result.bag !== "full");
+    setDockGuide({ phase, caught, catchPopupOpen, leaveGuideAfterCatch });
+  }, [phase, result, idleOn, leaveGuideAfterCatch, setDockGuide]);
+
+  useEffect(() => () => setDockGuide(null), [setDockGuide]);
 
   useEffect(() => {
     return () => {
@@ -87,7 +118,118 @@ export default function FishingScene() {
   }, [fisheryId]);
 
   useEffect(() => {
-    if (phase !== "bite" && phase !== "minigame") return;
+    if (!idleOn) {
+      if (idleAnimRef.current) {
+        idleAnimRef.current = false;
+        setPhase("ready");
+        setResult(null);
+      }
+      return;
+    }
+
+    idleAnimRef.current = true;
+    useGame.getState().simulateIdle(Date.now(), true);
+    if (!useGame.getState().save.idle) {
+      idleAnimRef.current = false;
+      setPhase("ready");
+      return;
+    }
+
+    let cancelled = false;
+    let timeoutId = 0;
+    let settleWait: (() => void) | null = null;
+    const wait = (ms: number) =>
+      new Promise<void>((resolve) => {
+        settleWait = resolve;
+        timeoutId = window.setTimeout(() => {
+          settleWait = null;
+          resolve();
+        }, ms);
+      });
+    let storyWait: (() => void) | null = null;
+    const waitStory = () =>
+      new Promise<void>((resolve) => {
+        storyWait = resolve;
+        storyCloseRef.current = () => {
+          storyWait = null;
+          storyCloseRef.current = null;
+          resolve();
+        };
+      });
+    const interruptWait = () => {
+      window.clearTimeout(timeoutId);
+      timeoutId = 0;
+      settleWait?.();
+      settleWait = null;
+      storyWait?.();
+      storyWait = null;
+      storyCloseRef.current = null;
+    };
+
+    const runLoop = async () => {
+      while (!cancelled && useGame.getState().save.idle) {
+        setResult(null);
+        setPhase("waiting");
+        await wait(IDLE_WAIT_MS);
+        if (cancelled || !useGame.getState().save.idle) break;
+        setPhase("idle_fight");
+        await wait(IDLE_FIGHT_MS);
+        if (cancelled || !useGame.getState().save.idle) break;
+        const got = useGame.getState().idleCatchOnce();
+        if (!got) {
+          if (!cancelled) {
+            setResult(null);
+            setPhase("ready");
+          }
+          break;
+        }
+        if (got.kind === "junk") {
+          setResult({ escaped: false, junk: got.junk, story: got.story ?? undefined });
+          setPhase("result");
+          await wait(IDLE_CATCH_MS);
+          if (cancelled || !useGame.getState().save.idle) break;
+          if (got.story) await waitStory();
+          continue;
+        }
+        setResult({
+          escaped: false,
+          bag: got.bag,
+          fishId: got.fish.id,
+          fishName: got.fish.name,
+        });
+        setPhase("result");
+        await wait(IDLE_CATCH_MS);
+      }
+    };
+
+    const onVis = () => {
+      if (document.hidden) {
+        cancelled = true;
+        interruptWait();
+        return;
+      }
+      cancelled = false;
+      useGame.getState().simulateIdle(Date.now(), true);
+      if (!useGame.getState().save.idle) {
+        idleAnimRef.current = false;
+        setPhase("ready");
+        return;
+      }
+      void runLoop();
+    };
+
+    document.addEventListener("visibilitychange", onVis);
+    void runLoop();
+
+    return () => {
+      cancelled = true;
+      interruptWait();
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [idleOn]);
+
+  useEffect(() => {
+    if (phase !== "bite" && phase !== "minigame" && phase !== "idle_fight") return;
     const id = spot;
     if (!id) return;
     const def = FISHING_SPOTS.find((s) => s.id === id);
@@ -185,8 +327,8 @@ export default function FishingScene() {
   }
 
   function reelEarly() {
+    if (idleOn) return;
     if (phase !== "waiting") return;
-    cancelIdle();
     clearTimers();
     setPhase("reeling");
     reelTimerRef.current = window.setTimeout(() => nextCast(), 480);
@@ -196,9 +338,15 @@ export default function FishingScene() {
     if (phase !== "bite") return;
     cancelIdle();
     clearTimers();
-    const def = pickBiteFish();
-    if (!def) return;
-    setFightFish(def);
+    const bite = pickBite();
+    if (!bite) return;
+    if (bite.kind === "junk") {
+      const story = applyJunkCatch(bite.junk) ?? undefined;
+      setResult({ escaped: false, junk: bite.junk, story });
+      setPhase("result");
+      return;
+    }
+    setFightFish(bite.fish);
     setFightPersonality(rollPersonality());
     setProgress(30);
     setPhase("minigame");
@@ -212,6 +360,14 @@ export default function FishingScene() {
     setShowBait(false);
     setPickingReplace(false);
     setPhase("ready");
+  }
+
+  function dismissCatchPopup() {
+    const hadFish = Boolean(
+      phase === "result" && result && !result.escaped && result.fishId && result.bag !== "full",
+    );
+    nextCast();
+    if (hadFish) setLeaveGuideAfterCatch(true);
   }
 
   function onWin() {
@@ -232,8 +388,10 @@ export default function FishingScene() {
   }
 
   function onDockDown(e: React.PointerEvent) {
-    if (phase === "result" && result && !result.escaped) {
+    if (phase === "result" && result && !result.escaped && !idleOn) {
+      if (result.junk?.kind === "bottle") return;
       if (result.bag === "full") return;
+      if (result.fishId) return;
       nextCast();
       return;
     }
@@ -269,7 +427,7 @@ export default function FishingScene() {
     setChargePower(0);
     if (phase === "minigame") return;
     if (!moved) {
-      if (phase === "pick" || phase === "ready") {
+      if (phase === "pick" || phase === "ready" || idleOn) {
         const node = document.elementFromPoint(e.clientX, e.clientY);
         const seat = node instanceof Element ? node.closest("[data-spot]") : null;
         const id = seat?.getAttribute("data-spot");
@@ -290,13 +448,13 @@ export default function FishingScene() {
   }
 
   const hint =
-    phase === "pick" ? "左右拖木板 · 点空位坐下"
-    : idle ? "点空位换座会取消挂机 · 下滑收竿 · 返回离开"
-    : phase === "ready" ? (baitCount > 0 ? "上滑甩杆，滑得越远漂越远 · 点空位换座" : "鱼饵用完了 · 点空位仍可换座")
+    phase === "pick" ? "点空位坐下"
+    : idle ? "换座会停挂机 · 下滑收竿"
+    : phase === "ready" ? (baitCount > 0 ? "向上滑甩竿" : "鱼饵用完了")
     : phase === "casting" ? "甩杆中"
     : phase === "reeling" ? "收竿中"
-    : phase === "waiting" ? "下滑收竿 · 左右拖看别人"
-    : phase === "bite" ? "鱼上钩了！下滑收竿"
+    : phase === "waiting" ? "浮漂动时下滑收竿"
+    : phase === "bite" ? "上钩了！下滑收竿"
     : "";
 
   return (
@@ -310,6 +468,7 @@ export default function FishingScene() {
     >
       <div className="fishing-hud">
         <button
+          data-guide="fishing-back"
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation();
@@ -328,11 +487,11 @@ export default function FishingScene() {
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation();
-              if (phase === "minigame" || phase === "casting" || phase === "reeling" || phase === "bite") return;
+              if (dockBusy) return;
               setShowBasket(false);
               setShowBait(true);
             }}
-            disabled={phase === "minigame" || phase === "casting" || phase === "reeling" || phase === "bite"}
+            disabled={dockBusy}
           >
             <GearIcon kind="bait" size={22} /> 换饵
           </button>
@@ -340,6 +499,7 @@ export default function FishingScene() {
         {spot && phase !== "pick" && (
           <button
             className={idle ? "primary" : ""}
+            data-guide="dock-idle"
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation();
@@ -347,19 +507,32 @@ export default function FishingScene() {
                 stopIdle();
                 return;
               }
-              if (phase === "minigame" || phase === "casting" || phase === "reeling" || phase === "bite") return;
+              if (dockBusy) return;
+              if (!startIdle()) return;
               clearTimers();
-              setPhase("ready");
-              startIdle();
             }}
           >
             {idle ? "✅挂机" : "挂机"}
           </button>
         )}
-        {spot && phase !== "pick" && (
-          <span className="chip stamina">能 {Math.floor(save.stamina)}</span>
-        )}
       </div>
+
+      {(hint && phase !== "minigame" && phase !== "result" && !showBait) ||
+      (phase === "result" && result?.escaped && !idleOn) ? (
+        <div className="dock-text-rail" onPointerDown={(e) => e.stopPropagation()}>
+          {hint && phase !== "minigame" && phase !== "result" && !showBait && (
+            <div className={`dock-hint ${phase === "bite" ? "accent" : ""}`}>
+              {hint}
+            </div>
+          )}
+          {phase === "result" && result?.escaped && !idleOn && (
+            <div className="dock-sheet">
+              <div>鱼跑了……</div>
+              <button className="primary" onClick={nextCast}>继续等下一条</button>
+            </div>
+          )}
+        </div>
+      ) : null}
 
       <DockWorld
         pan={pan}
@@ -368,19 +541,15 @@ export default function FishingScene() {
         spotId={spot}
         neighbors={neighbors}
         playerFishId={phase === "result" && result && !result.escaped ? result.fishId ?? null : null}
+        playerJunkKind={phase === "result" && result && !result.escaped ? result.junk?.kind ?? null : null}
         playerEscaped={Boolean(result?.escaped)}
         onPickSpot={pickSpot}
         castPower={castPower}
         playerOutfitId={save.equippedOutfit}
         playerSex={save.lookSex}
         chargePower={chargePower}
+        fisheryId={fisheryId ?? "village_pond"}
       />
-
-      {hint && phase !== "minigame" && phase !== "result" && !showBait && (
-        <div className={`dock-hint ${phase === "bite" ? "accent" : ""}`}>
-          {hint}
-        </div>
-      )}
 
       {showBasket && (
         <div className="basket-peek" onPointerDown={(e) => e.stopPropagation()}>
@@ -388,7 +557,6 @@ export default function FishingScene() {
             <strong>鱼筐</strong>
             <span className="dim">{bw.toFixed(1)}/{basket?.weightCap}kg</span>
           </div>
-          <p className="dim">点放生可把鱼放回水里</p>
           {save.basket.length === 0 && <div className="dim">空</div>}
           {save.basket.map((b) => {
             const def = FISH_BY_ID[b.defId];
@@ -396,17 +564,7 @@ export default function FishingScene() {
             return (
               <div className="peek-fish" key={b.uid}>
                 <FishPortrait id={def.id} size={36} alt={def.name} />
-                <span>{def.name} <span className={`chip ${def.quality}`}>{QUALITY_LABEL[def.quality]}</span></span>
-                <button
-                  className="danger"
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    releaseBasket(b.uid);
-                  }}
-                >
-                  放生
-                </button>
+                <span>{def.name} <QualityChip quality={def.quality} /></span>
               </div>
             );
           })}
@@ -423,7 +581,7 @@ export default function FishingScene() {
         >
           <div className="modal" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
             <div className="modal-title">换鱼饵</div>
-            <p className="dim">选出钓携带的一种，下竿会消耗它。</p>
+            <p className="dim">选一种下竿用的饵。</p>
             {trip.map((id) => {
               const c = CONSUMABLE_BY_ID[id];
               const n = save.baitStock[id] ?? 0;
@@ -442,7 +600,7 @@ export default function FishingScene() {
                 </button>
               );
             })}
-            {trip.length === 0 && <p className="dim">没有携带鱼饵，去地图页勾选。</p>}
+            {trip.length === 0 && <p className="dim">没带饵，去地图页勾选。</p>}
             <button onClick={() => setShowBait(false)}>关闭</button>
           </div>
         </div>
@@ -453,7 +611,7 @@ export default function FishingScene() {
           <div className="row-between dock-fight-hud">
             <span className="row" style={{ alignItems: "center" }}>
               <FishPortrait id={fightFish.id} size={36} alt={fightFish.name} />
-              搏斗：{fightFish.name} <span className={`chip ${fightFish.quality}`}>{QUALITY_LABEL[fightFish.quality]}</span>
+              搏斗：{fightFish.name} <QualityChip quality={fightFish.quality} />
             </span>
             <span>{Math.round(progress)}%</span>
           </div>
@@ -474,6 +632,7 @@ export default function FishingScene() {
           </div>
           <button
             className="primary thumb-btn"
+            data-guide="fight-hold"
             onPointerDown={(e) => { e.stopPropagation(); setHolding(true); }}
             onPointerUp={(e) => { e.stopPropagation(); setHolding(false); }}
           >
@@ -482,26 +641,54 @@ export default function FishingScene() {
         </div>
       )}
 
-      {phase === "result" && result?.escaped && (
-        <div className="dock-sheet" onPointerDown={(e) => e.stopPropagation()}>
-          <div>鱼跑了……</div>
-          <button className="primary" onClick={nextCast}>继续等下一条</button>
+      {phase === "result" && result && !result.escaped && result.junk && (result.junk.kind === "bottle" || !idleOn) && (
+        <div className="modal-backdrop" onPointerDown={(e) => e.stopPropagation()}>
+          <div className="modal" onPointerDown={(e) => e.stopPropagation()}>
+            <div className="modal-title">{result.junk.name}</div>
+            <JunkMark kind={result.junk.kind} size={88} />
+            {result.junk.kind === "bottle" && result.story && (
+              <p className="bottle-story">{result.story.body}</p>
+            )}
+            {result.junk.kind === "bag" && <p>你顺手扔进了垃圾桶。</p>}
+            {result.junk.kind === "weed" && <p>洗洗能当普通鱼粮，已经收起来了。</p>}
+            <button
+              className="primary"
+              onClick={() => {
+                if (idleOn) storyCloseRef.current?.();
+                else nextCast();
+              }}
+            >
+              {result.junk.kind === "bottle" ? "看完了" : "继续"}
+            </button>
+          </div>
         </div>
       )}
 
-      {phase === "result" && result && !result.escaped && result.fishId && result.bag === "full" && !pickingReplace && (
+      {phase === "result" && result && !result.escaped && result.fishId && result.bag === "full" && !pickingReplace && !idleOn && (
         <div className="modal-backdrop" onPointerDown={(e) => e.stopPropagation()}>
           <div className="modal" onPointerDown={(e) => e.stopPropagation()}>
             <div className="modal-title">鱼筐满了</div>
             <FishPortrait id={result.fishId} size={72} alt={result.fishName} />
             <p>钓到了 {result.fishName}。要换掉筐里的一条吗？</p>
             <button className="primary" onClick={() => setPickingReplace(true)}>替换</button>
-            <button onClick={nextCast}>放生这条</button>
+            <button
+              onClick={() =>
+                askConfirm({
+                  title: "确认放生",
+                  message: `确定放生「${result.fishName}」？放生后无法找回。`,
+                  confirmLabel: "放生",
+                  danger: true,
+                  onConfirm: nextCast,
+                })
+              }
+            >
+              放生这条
+            </button>
           </div>
         </div>
       )}
 
-      {phase === "result" && result && !result.escaped && result.fishId && result.bag === "full" && pickingReplace && (
+      {phase === "result" && result && !result.escaped && result.fishId && result.bag === "full" && pickingReplace && !idleOn && (
         <div className="modal-backdrop" onPointerDown={(e) => e.stopPropagation()}>
           <div className="modal" onPointerDown={(e) => e.stopPropagation()}>
             <div className="modal-title">选一条换掉</div>
@@ -524,7 +711,7 @@ export default function FishingScene() {
                 >
                   <span className="row" style={{ alignItems: "center" }}>
                     <FishPortrait id={def.id} size={36} alt={def.name} />
-                    {def.name} <span className={`chip ${def.quality}`}>{QUALITY_LABEL[def.quality]}</span>
+                    {def.name} <QualityChip quality={def.quality} />
                     {ok ? "" : " · 超重"}
                   </span>
                 </button>
@@ -535,9 +722,9 @@ export default function FishingScene() {
         </div>
       )}
 
-      {phase === "result" && result && !result.escaped && result.fishId && result.bag !== "full" && (
-        <div className="modal-backdrop" onPointerDown={() => nextCast()}>
-          <div className="stage-card catch-card">
+      {phase === "result" && result && !result.escaped && result.fishId && result.bag !== "full" && !idleOn && (
+        <div className="modal-backdrop" onPointerDown={(e) => e.stopPropagation()}>
+          <div className="stage-card catch-card" onPointerDown={(e) => e.stopPropagation()} onClick={dismissCatchPopup}>
             <FishPortrait id={result.fishId} size={120} alt={result.fishName} />
             <strong>{result.fishName}</strong>
             <div className="catch-into">
@@ -546,7 +733,7 @@ export default function FishingScene() {
                 {result.bag === "replaced" ? "已换进鱼筐" : "已放入鱼筐"}
               </span>
             </div>
-            <div className="dim">点任意处继续</div>
+            <div className="dim">点击关闭</div>
           </div>
         </div>
       )}

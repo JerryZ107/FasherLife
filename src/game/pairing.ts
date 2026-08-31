@@ -48,10 +48,14 @@ export function pickOffspringDefId(parentA: string, parentB: string): string {
   return Math.random() < 0.5 ? parentA : parentB;
 }
 
-export function pairRefuseReason(a: TankFish, b: TankFish): string | null {
+export function pairRefuseReason(
+  a: TankFish,
+  b: TankFish,
+  opts?: { requireSameTank?: boolean },
+): string | null {
   if (a.uid === b.uid) return "要选两条鱼";
   if (a.dead || b.dead) return "死鱼不能配对";
-  if (a.tankId !== b.tankId) return "要在同一鱼缸里";
+  if (opts?.requireSameTank !== false && a.tankId !== b.tankId) return "要在同一鱼缸里";
   if (fishSex(a) === fishSex(b)) return "要一公一母";
   if (a.pairId || b.pairId) return "已经有配偶了";
   return null;
@@ -103,8 +107,9 @@ export function rollPairAccept(
   a: TankFish,
   b: TankFish,
   bonus = 0,
+  opts?: { requireSameTank?: boolean },
 ): { ok: boolean; reason: string } {
-  const hard = pairRefuseReason(a, b);
+  const hard = pairRefuseReason(a, b, opts);
   if (hard) return { ok: false, reason: hard };
   const love = loveRefuseReason(a, b);
   if (love) return { ok: false, reason: love };
@@ -136,6 +141,7 @@ function clearPairFields(f: TankFish): void {
   f.pairId = null;
   f.gestationLeft = 0;
   f.scentLayAt = 0;
+  f.layCount = 0;
 }
 
 export function breakPair(save: SaveData, uid: string): void {
@@ -158,6 +164,7 @@ export function bindPair(save: SaveData, aUid: string, bUid: string): string {
       f.pairId = pid;
       f.gestationLeft = left;
       f.scentLayAt = 0;
+      f.layCount = 0;
     }
   }
   return pid;
@@ -230,11 +237,34 @@ export function layEggForPair(save: SaveData, pair: { pairId: string; a: TankFis
   };
   save.eggs.push(egg);
   const next = gestationDays(pairMinHealth(pair.a, pair.b)) ?? 0;
+  const laid = Math.max(pair.a.layCount ?? 0, pair.b.layCount ?? 0) + 1;
   pair.a.gestationLeft = next;
   pair.b.gestationLeft = next;
   pair.a.scentLayAt = 0;
   pair.b.scentLayAt = 0;
+  pair.a.layCount = laid;
+  pair.b.layCount = laid;
   return true;
+}
+
+export function pairLayCount(a: TankFish, b: TankFish): number {
+  return Math.max(a.layCount ?? 0, b.layCount ?? 0);
+}
+
+/** 下次产卵时间：求偶香倒计时，或孕期剩余游戏天。 */
+export function pairLayTimeText(a: TankFish, b: TankFish, now = Date.now()): string {
+  const scent = Math.max(a.scentLayAt ?? 0, b.scentLayAt ?? 0);
+  if (scent > now) {
+    const sec = Math.max(1, Math.ceil((scent - now) / 1000));
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return m > 0 ? `${m}分${String(s).padStart(2, "0")}秒后（求偶香）` : `${s}秒后（求偶香）`;
+  }
+  if (scent > 0) return "即将产卵（求偶香）";
+  if (pairMinHealth(a, b) <= 60) return "健康过低，暂停产卵";
+  const left = Math.max(a.gestationLeft ?? 0, b.gestationLeft ?? 0);
+  if (left <= 0) return "下次结算产卵";
+  return `${left} 天后`;
 }
 
 function tickGestation(save: SaveData, tankId: string, day: number): number {

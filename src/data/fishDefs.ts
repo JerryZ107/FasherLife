@@ -6,9 +6,10 @@ import type { FishDef } from "../types";
  * 全 62 鱼名单仍见 ADR-002 附录，本 Demo 不进游戏。
  */
 
+/** 滑块移速按品质分档：当前手感作为稀有；优良为其一半，普通为其三分之一。 */
 const motionByQuality: Record<Quality, FishDef["motion"]> = {
-  common: { sliderSize: 0.28, amplitude: 0.18, frequency: 0.6, noiseWeight: 0.15, speed: 1.0 },
-  fine: { sliderSize: 0.22, amplitude: 0.24, frequency: 0.9, noiseWeight: 0.25, speed: 1.3 },
+  common: { sliderSize: 0.28, amplitude: 0.18, frequency: 0.6, noiseWeight: 0.15, speed: 0.57 },
+  fine: { sliderSize: 0.22, amplitude: 0.24, frequency: 0.9, noiseWeight: 0.25, speed: 0.85 },
   rare: { sliderSize: 0.17, amplitude: 0.3, frequency: 1.3, noiseWeight: 0.4, speed: 1.7 },
   precious: { sliderSize: 0.13, amplitude: 0.36, frequency: 1.7, noiseWeight: 0.55, speed: 2.1 },
   ultimate: { sliderSize: 0.1, amplitude: 0.42, frequency: 2.1, noiseWeight: 0.7, speed: 2.5 },

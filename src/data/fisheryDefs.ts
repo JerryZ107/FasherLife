@@ -1,11 +1,11 @@
 import type { FisheryDef } from "../types";
 
-/** Demo 两个地图点：免费乡村池塘 + 付费清溪（办卡/买票/潜入）。 */
+/** Demo 两个地图点：免费清溪池 + 付费鱼塘（办卡/买票/潜入）。 */
 export const FISHERY_DEFS: FisheryDef[] = [
   {
     id: "village_pond",
-    name: "乡村池塘",
-    entry: { type: "free" },
+    name: "鱼塘",
+    entry: { type: "paid", ticketPrice: 15, cardPrice: 300 },
     pool: [
       { fishId: "crucian", weight: 30 },
       { fishId: "puffer", weight: 22 },
@@ -19,8 +19,8 @@ export const FISHERY_DEFS: FisheryDef[] = [
   },
   {
     id: "clear_stream",
-    name: "清溪",
-    entry: { type: "paid", ticketPrice: 15, cardPrice: 300 },
+    name: "清溪池",
+    entry: { type: "free" },
     pool: [
       { fishId: "minnow", weight: 26 },
       { fishId: "horse_mouth", weight: 22 },
@@ -39,6 +39,6 @@ export const FISHERY_BY_ID: Record<string, FisheryDef> = Object.fromEntries(
 );
 
 export const FISHERY_MAP_POS: Record<string, { left: string; top: string }> = {
-  village_pond: { left: "18%", top: "56%" },
-  clear_stream: { left: "58%", top: "38%" },
+  village_pond: { left: "18%", top: "38%" },
+  clear_stream: { left: "58%", top: "74%" },
 };

@@ -2,6 +2,7 @@ import { useRef, useState, type PointerEvent } from "react";
 import { useGame } from "../store/gameStore";
 import { FISHERY_BY_ID } from "../data/fisheryDefs";
 import SneakCanvas, { type SneakPhase } from "./SneakCanvas";
+import { PageHead } from "../ui/chrome";
 
 export default function SneakScene() {
   const save = useGame((s) => s.save);
@@ -43,10 +44,7 @@ export default function SneakScene() {
 
   return (
     <div className="sneak">
-      <div className="page-head">
-        <button onClick={() => setScene("fishing_map")}>← 地图</button>
-        <h2>潜入 {fishery?.name ?? ""}</h2>
-      </div>
+      <PageHead onBack={() => setScene("fishing_map")} backLabel="地图" title={`潜入 ${fishery?.name ?? ""}`} />
       <div className="sneak-field">
         <SneakCanvas
           phase={phase}
@@ -59,36 +57,41 @@ export default function SneakScene() {
           onHiddenChange={setHidden}
         />
         {phase === "cg" && (
-          <div className="sneak-cg sneak-cg-lite">
-            <strong>翻墙而下……</strong>
-            <div className="dim">树挡住视线 · 钻进草丛可藏身 · 往上溜到钓鱼区</div>
-          </div>
+          <>
+            <div className="sneak-cg sneak-cg-lite">
+              <strong>翻墙而入</strong>
+              <div className="dim">上墙 → 翻越 → 落地</div>
+            </div>
+            <button type="button" className="sneak-skip" onClick={() => setPhase("play")}>
+              跳过
+            </button>
+          </>
         )}
         {phase === "play" && hidden && <div className="sneak-hidden">藏身中</div>}
         {phase === "play" && (
           <div className="sneak-hint">等锥光转开再冲 · 树后穿插 · 向上到钓鱼区</div>
         )}
-      </div>
-      {phase === "play" && (
-        <div
-          className="joystick"
-          onPointerDown={onStick}
-          onPointerMove={moveStick}
-          onPointerUp={endStick}
-          onPointerCancel={endStick}
-        >
+        {phase === "play" && (
           <div
-            className="joystick-knob"
-            style={{ transform: `translate(${stick.current.dx * 22}px, ${stick.current.dy * 22}px)` }}
-          />
-          <span>拇指摇杆</span>
-        </div>
-      )}
+            className="joystick"
+            onPointerDown={onStick}
+            onPointerMove={moveStick}
+            onPointerUp={endStick}
+            onPointerCancel={endStick}
+          >
+            <div
+              className="joystick-knob"
+              style={{ transform: `translate(${stick.current.dx * 22}px, ${stick.current.dy * 22}px)` }}
+            />
+            <span>拇指摇杆</span>
+          </div>
+        )}
+      </div>
       {phase === "caught" && (
         <div className="modal-backdrop">
           <div className="modal">
             <div className="modal-title">被抓住了</div>
-            <p className="dim">必须在交罚款、补门票、办月卡里选一个。</p>
+            <p className="dim">交罚款、补票或办月卡，选一个。</p>
             <p>钱包：{save.gold} 金</p>
             <button onClick={() => {
               if (paySneakFine(fisheryId ?? "")) setScene("fishing_map");

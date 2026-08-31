@@ -1,8 +1,7 @@
-import { HOSTING_FEE } from "./constants";
+import { HOSTING_FEE_PER_TANK } from "./constants";
 import { FISH_BY_ID } from "../data/fishDefs";
 import { CONSUMABLE_BY_ID, CONSUMABLE_DEFS, baitIdFromFood, foodIdFromBait } from "../data/consumableDefs";
 import type { Quality } from "../types";
-import type { TankFish } from "../save/saveSchema";
 
 export function fishQuality(defId: string): Quality {
   return FISH_BY_ID[defId]?.quality ?? "common";
@@ -15,6 +14,8 @@ export function canFeed(fishDefId: string, foodId: string): boolean {
   const foodQ = CONSUMABLE_BY_ID[baitId]?.quality ?? "common";
   return foodQ === fishQ;
 }
+
+export type FeedResult = "ate" | "refused" | "empty" | "skip";
 
 /** 库存里找出一份该品质鱼粮；优先当前装备的那份。 */
 export function pickFoodForQuality(
@@ -46,12 +47,8 @@ export function cheapestFoodForQuality(quality: Quality): { foodId: string; pric
   return best;
 }
 
-export function hostingFeeForFish(defId: string): number {
-  return HOSTING_FEE[fishQuality(defId)];
-}
-
-export function hostingDailyFee(tank: TankFish[]): number {
-  return tank.filter((f) => !f.dead).reduce((s, f) => s + hostingFeeForFish(f.defId), 0);
+export function hostingDailyFee(hostedCount: number): number {
+  return hostedCount * HOSTING_FEE_PER_TANK;
 }
 
 /** 未喂当日：基础 -1，死鱼每条再 −1；健康低于 60 按 2 的指数扣。 */

@@ -5,9 +5,11 @@ import { FishPortrait } from "../art/Art";
 import { FISHERY_BY_ID } from "../data/fisheryDefs";
 import { CONSUMABLE_BY_ID } from "../data/consumableDefs";
 import { QUALITY_LABEL, QUALITY_ORDER, type Quality } from "../types";
+import { EmptyHint, ModalSheet, Page, PageBody, PageHead, QualityChip } from "../ui/chrome";
 
 export default function EncyclopediaScene() {
   const setScene = useGame((s) => s.setScene);
+  const notifyQuest = useGame((s) => s.notifyQuest);
   const [query, setQuery] = useState("");
   const [applied, setApplied] = useState("");
   const [showFilter, setShowFilter] = useState(false);
@@ -25,6 +27,11 @@ export default function EncyclopediaScene() {
     setter(n);
   }
 
+  function leave() {
+    notifyQuest("read_encyc");
+    setScene("equipment");
+  }
+
   const visible = FISH_DEFS.filter((f) => {
     if (applied && !f.name.includes(applied)) return false;
     if (qualities.size && !qualities.has(f.quality)) return false;
@@ -34,20 +41,15 @@ export default function EncyclopediaScene() {
   });
 
   return (
-    <div className="page">
-      <div className="page-head">
-        <button onClick={() => setScene("equipment")}>← 书籍</button>
-        <h2>图鉴 · {FISH_DEFS.length}</h2>
-      </div>
+    <Page>
+      <PageHead onBack={leave} backLabel="书籍" title={`图鉴 · ${FISH_DEFS.length}`} backGuide="encyc-back" />
       <div className="search-bar">
         <input placeholder="搜索鱼名" value={query} onChange={(e) => setQuery(e.target.value)} />
         <button className="primary" onClick={() => setApplied(query.trim())}>搜索</button>
         <button onClick={() => setShowFilter(true)}>筛选</button>
       </div>
       {showFilter && (
-        <div className="modal-backdrop" onClick={() => setShowFilter(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-title">筛选（可多选）</div>
+        <ModalSheet title="筛选（可多选）" onClose={() => setShowFilter(false)}>
             <div className="dim">品质</div>
             <div className="row">
               {QUALITY_ORDER.map((q) => (
@@ -73,18 +75,18 @@ export default function EncyclopediaScene() {
               ))}
             </div>
             <button className="primary" onClick={() => setShowFilter(false)}>完成</button>
-          </div>
-        </div>
+        </ModalSheet>
       )}
-      <div className="page-body encyclopedia-grid">
+      <PageBody className="encyclopedia-grid">
+        {visible.length === 0 && <EmptyHint>没有符合条件的鱼</EmptyHint>}
         {visible.map((f) => {
           const fishery = FISHERY_BY_ID[f.fisheryId];
           const bait = CONSUMABLE_BY_ID[f.preferredBaitId];
           return (
-            <div className="panel" key={f.id}>
+            <div className="panel ency-card" key={f.id}>
               <div className="row-between">
                 <strong>{f.name}</strong>
-                <span className={`chip ${f.quality}`}>{QUALITY_LABEL[f.quality]}</span>
+                <QualityChip quality={f.quality} />
               </div>
               <div className="ency-art">
                 <FishPortrait id={f.id} size={88} alt={f.name} />
@@ -97,7 +99,7 @@ export default function EncyclopediaScene() {
             </div>
           );
         })}
-      </div>
-    </div>
+      </PageBody>
+    </Page>
   );
 }

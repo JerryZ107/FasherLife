@@ -32,6 +32,11 @@ function loadImage(url: string): Promise<HTMLImageElement> {
   });
 }
 
+/** 普通贴图（不抠白底）。避免走 Pixi Assets 并发缓存坑。 */
+export async function loadTexture(url: string): Promise<Texture> {
+  return Texture.from(await loadImage(url));
+}
+
 /** AI 鱼图是白底，入缸游动前把近白像素抠掉。 */
 export function loadKeyedTexture(url: string): Promise<Texture> {
   return loadKeyedTextureMode(url, "fish");

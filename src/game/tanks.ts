@@ -1,5 +1,5 @@
-import type { Quality } from "../types";
-import type { PlayerTank, SaveData } from "../save/saveSchema";
+import type { Quality, Personality, LoveView, Sex } from "../types";
+import type { PlayerTank, SaveData, TankFish, TankEgg } from "../save/saveSchema";
 import { capacityForQuality } from "../data/tankDefs";
 
 export const STARTER_TANK_ID = "tank_a";
@@ -10,8 +10,7 @@ export const STARTER_TANK_SLOTS = 1;
 /** 每次扩建增加的缸位数。 */
 export const EXPAND_STEP = 1;
 export const EXPAND_GOLD = 120;
-export const EXPAND_DAYS = 2;
-export const EXPAND_PEARL = 2;
+export const EXPAND_MS = 3000;
 
 export function starterTanks(): PlayerTank[] {
   return [
@@ -23,6 +22,60 @@ export function starterTanks(): PlayerTank[] {
       decor: "none",
       tankAttractUntilDay: 0,
       tankAttractBonus: 0,
+    },
+  ];
+}
+
+/** 新存档赠送的 3 条普通鱼（2 公 1 母）：高冷 / 暴躁 / 胆小各一，用于引导喂食与卖鱼。 */
+export function starterFish(): TankFish[] {
+  const now = Date.now();
+  const make = (
+    uid: string,
+    defId: string,
+    sex: Sex,
+    personality: Personality,
+    loveView: LoveView = "any",
+  ): TankFish => ({
+    uid,
+    defId,
+    health: 100,
+    dead: false,
+    lastFedDay: -1,
+    lastSettledAt: now,
+    sex,
+    pairId: null,
+    tankId: STARTER_TANK_ID,
+    attractUntilDay: 0,
+    attractBonus: 0,
+    personality,
+    loveView,
+    gestationLeft: 0,
+    scentLayAt: 0,
+    layCount: 0,
+    affection: 0,
+    customName: null,
+    petDay: -1,
+    petCount: 0,
+  });
+  return [
+    make("s_minnow", "minnow", "male", "aloof"),
+    make("s_black_carp", "black_carp", "male", "hot"),
+    make("s_puffer", "puffer", "female", "timid"),
+  ];
+}
+
+/** 新存档赠送的 1 枚普通卵（青鱼 × 河豚）。 */
+export function starterEggs(): TankEgg[] {
+  return [
+    {
+      uid: "s_egg_1",
+      tankId: STARTER_TANK_ID,
+      pairId: "s_pair_1",
+      parentA: "black_carp",
+      parentB: "puffer",
+      laidDay: 0,
+      readyDay: 0,
+      started: false,
     },
   ];
 }
@@ -39,12 +92,74 @@ export function emptyTank(id: string, name: string, quality: Quality, decor: Pla
   return { id, name, quality, capacity: capacityForQuality(quality), decor, tankAttractUntilDay: 0, tankAttractBonus: 0 };
 }
 
+/** 保证凹槽数组长度与 tankSlots 一致。 */
+export function ensureTankSlotArray(save: SaveData): (string | null)[] {
+  const slots = [...save.tankSlotIds];
+  while (slots.length < save.tankSlots) slots.push(null);
+  return slots.slice(0, save.tankSlots);
+}
+
+export function placedTankIds(save: SaveData): string[] {
+  return ensureTankSlotArray(save).filter((id): id is string => id != null);
+}
+
+export function placedTanks(save: SaveData): PlayerTank[] {
+  return placedTankIds(save)
+    .map((id) => tankById(save, id))
+    .filter((t): t is PlayerTank => Boolean(t));
+}
+
+export function slotIndexOfTank(save: SaveData, tankId: string): number {
+  return ensureTankSlotArray(save).findIndex((id) => id === tankId);
+}
+
+export function hasEmptySlot(save: SaveData): boolean {
+  return ensureTankSlotArray(save).some((id) => id == null);
+}
+
+export function countPlacedSlots(save: SaveData): number {
+  return placedTankIds(save).length;
+}
+
+/** 是否还有空凹槽可摆缸。 */
 export function hasFreeTankSlot(save: SaveData): boolean {
-  return save.tanks.length < save.tankSlots;
+  return hasEmptySlot(save);
+}
+
+export function firstEmptySlotIndex(save: SaveData): number {
+  return ensureTankSlotArray(save).findIndex((id) => id == null);
+}
+
+export function unplacedTanks(save: SaveData): PlayerTank[] {
+  const placed = new Set(placedTankIds(save));
+  return save.tanks.filter((t) => !placed.has(t.id));
+}
+
+export function isTankPlaced(save: SaveData, tankId: string): boolean {
+  return placedTankIds(save).includes(tankId);
 }
 
 export function tankById(save: SaveData, tankId: string): PlayerTank | undefined {
   return save.tanks.find((t) => t.id === tankId);
+}
+
+export function migrateTankSlotIds(tanks: PlayerTank[], tankSlots: number, raw: unknown): (string | null)[] {
+  if (Array.isArray(raw)) {
+    const slots = raw.map((x) => (x == null || x === "" ? null : String(x)));
+    while (slots.length < tankSlots) slots.push(null);
+    return slots.slice(0, tankSlots);
+  }
+  const slots: (string | null)[] = Array.from({ length: tankSlots }, () => null);
+  tanks.forEach((t, i) => {
+    if (i < tankSlots) slots[i] = t.id;
+  });
+  return slots;
+}
+
+export const ALL_TANKS = "all";
+
+export function livingInFilter(save: SaveData, tankFilter: string) {
+  return save.tank.filter((f) => !f.dead && (tankFilter === ALL_TANKS || f.tankId === tankFilter));
 }
 
 export function occupancy(save: SaveData, tankId: string): number {

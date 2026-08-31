@@ -281,6 +281,10 @@ export function visibleWorldH(screenH: number, scale: number, squash: number, pa
   return Math.max(40, (screenH - padY * 2) / (scale * squash));
 }
 
+export function visibleWorldW(screenW: number, scale: number, padX: number) {
+  return Math.max(20, (screenW - padX * 2) / scale);
+}
+
 export function clampCamY(camY: number, visH: number) {
   return Math.max(0, Math.min(Math.max(0, WORLD_H - visH), camY));
 }

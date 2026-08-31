@@ -1,14 +1,16 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useGame } from "../store/gameStore";
 import { FISHERY_DEFS, FISHERY_MAP_POS } from "../data/fisheryDefs";
 import { FISH_BY_ID } from "../data/fishDefs";
 import { CONSUMABLE_BY_ID } from "../data/consumableDefs";
 import { ROD_BY_ID, STOOL_BY_ID, BASKET_BY_ID } from "../data/equipmentDefs";
-import { QUALITY_LABEL } from "../types";
 import { OUTFIT_DEFS } from "../data/outfitDefs";
 import { basketWeightKg } from "../game/weight";
 import { CharImg, FishPortrait, GearIcon } from "../art/Art";
 import { ART } from "../art/assets";
+import { ModalSheet, Page, PageHead, QualityChip } from "../ui/chrome";
+import { useUi } from "../store/uiStore";
+import { isReturnTrip } from "../game/guide";
 
 type Picker = "none" | "bait" | "rod" | "stool" | "basket" | "loadout" | "outfit";
 
@@ -26,11 +28,22 @@ export default function FishingMapScene() {
   const deleteLoadout = useGame((s) => s.deleteLoadout);
   const equipOutfit = useGame((s) => s.equipOutfit);
   const setLookSex = useGame((s) => s.setLookSex);
-  const releaseBasket = useGame((s) => s.releaseBasket);
   const [picked, setPicked] = useState<string | null>(null);
   const [gate, setGate] = useState<string | null>(null);
   const [picker, setPicker] = useState<Picker>("none");
   const [newLoadoutName, setNewLoadoutName] = useState("");
+  const setMapPicked = useUi((s) => s.setMapPicked);
+  const uiTripPhase = useUi((s) => s.guideTripPhase);
+  const storeFishMode = isReturnTrip(save.guideTripPhase ?? uiTripPhase);
+
+  useEffect(() => {
+    if (storeFishMode) setPicked(null);
+  }, [storeFishMode]);
+
+  useEffect(() => {
+    setMapPicked(storeFishMode ? null : picked);
+    return () => setMapPicked(null);
+  }, [picked, setMapPicked, storeFishMode]);
 
   const rod = ROD_BY_ID[save.equipped.rod];
   const bait = CONSUMABLE_BY_ID[save.equipped.bait];
@@ -40,6 +53,7 @@ export default function FishingMapScene() {
   const bw = basketWeightKg(save.basket);
 
   function goIn(id: string) {
+    if (storeFishMode) return;
     const f = FISHERY_DEFS.find((x) => x.id === id);
     if (!f) return;
     if (f.entry.type === "free" || hasFisheryCard(id)) {
@@ -54,22 +68,27 @@ export default function FishingMapScene() {
     : (bait?.name ?? "—");
 
   return (
-    <div className="page">
-      <div className="page-head">
-        <button onClick={() => setScene("aquarium")}>← 水族馆</button>
-        <h2>钓鱼地图</h2>
-      </div>
+    <Page>
+      <PageHead onBack={() => setScene("aquarium")} backLabel="水族馆" title="钓鱼地图" backGuide="back-aquarium" />
       <div className="map-field" style={{ backgroundImage: `url(${ART.bgMap})` }}>
         {FISHERY_DEFS.map((fishery) => {
           const card = hasFisheryCard(fishery.id);
           const selected = picked === fishery.id;
           const pos = FISHERY_MAP_POS[fishery.id] ?? { left: "40%", top: "40%" };
+          const mapGuide =
+            !storeFishMode && fishery.id === "clear_stream" ? "fishery-clear_stream" : undefined;
+          const enterGuide =
+            !storeFishMode && selected && fishery.id === "clear_stream" ? "enter-fishery" : undefined;
           return (
             <div
               key={fishery.id}
               className={`map-node ${selected ? "selected" : ""}`}
+              data-guide={mapGuide}
               style={{ left: pos.left, top: pos.top }}
-              onClick={() => setPicked(fishery.id)}
+              onClick={() => {
+                if (storeFishMode) return;
+                setPicked(fishery.id);
+              }}
               onDoubleClick={() => goIn(fishery.id)}
             >
               <div className="map-name">{fishery.name}</div>
@@ -77,7 +96,11 @@ export default function FishingMapScene() {
                 {fishery.entry.type === "free" ? "免费" : card ? "月卡有效" : `${fishery.entry.ticketPrice}金/次`}
               </div>
               {selected && (
-                <button className="primary enter-float" onClick={(e) => { e.stopPropagation(); goIn(fishery.id); }}>
+                <button
+                  className="primary enter-float"
+                  data-guide={enterGuide}
+                  onClick={(e) => { e.stopPropagation(); goIn(fishery.id); }}
+                >
                   进入
                 </button>
               )}
@@ -100,11 +123,20 @@ export default function FishingMapScene() {
       </div>
 
       {picker !== "none" && (
-        <div className="modal-backdrop" onClick={() => setPicker("none")}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <ModalSheet
+          title={
+            picker === "bait" ? "鱼饵（可多选携带）"
+            : picker === "basket" ? `鱼筐 ${save.basket.length}/${basket?.capacity} · ${bw.toFixed(1)}/${basket?.weightCap}kg`
+            : picker === "loadout" ? "自定义装备组合"
+            : picker === "outfit" ? "服装"
+            : picker === "rod" ? "鱼竿"
+            : picker === "stool" ? "板凳"
+            : undefined
+          }
+          onClose={() => setPicker("none")}
+        >
             {picker === "bait" && (
               <>
-                <div className="modal-title">鱼饵（可多选携带）</div>
                 {Object.entries(save.baitStock).filter(([, n]) => n > 0).map(([id, n]) => {
                   const c = CONSUMABLE_BY_ID[id];
                   if (!c) return null;
@@ -132,21 +164,19 @@ export default function FishingMapScene() {
             ))}
             {picker === "basket" && (
               <>
-                <div className="modal-title">鱼筐 {save.basket.length}/{basket?.capacity} · {bw.toFixed(1)}/{basket?.weightCap}kg</div>
                 {save.ownedBaskets.map((id) => (
                   <button key={id} className={save.equipped.basket === id ? "primary" : ""} onClick={() => { equip("basket", id); }}>
                     {BASKET_BY_ID[id].name}
                   </button>
                 ))}
-                <div className="dim">点放生可把鱼放回水里。要入缸：回水族馆点「鱼筐」</div>
+                <div className="dim">存进缸：回馆里开鱼筐</div>
                 {save.basket.map((b) => {
                   const def = FISH_BY_ID[b.defId];
                   if (!def) return null;
                   return (
                     <div className="peek-fish" key={b.uid}>
                       <FishPortrait id={def.id} size={36} alt={def.name} />
-                      <span>{def.name} <span className={`chip ${def.quality}`}>{QUALITY_LABEL[def.quality]}</span></span>
-                      <button className="danger" onClick={() => releaseBasket(b.uid)}>放生</button>
+                      <span>{def.name} <QualityChip quality={def.quality} /></span>
                     </div>
                   );
                 })}
@@ -154,8 +184,7 @@ export default function FishingMapScene() {
             )}
             {picker === "loadout" && (
               <>
-                <div className="modal-title">自定义装备组合</div>
-                <p className="dim">选用一套立刻换上；覆盖会把当前四槽、组件和服装写进该套。</p>
+                <p className="dim">点一套立刻换上。</p>
                 {save.loadouts.map((l) => (
                   <div className="panel row-between" key={l.id}>
                     <button
@@ -188,8 +217,7 @@ export default function FishingMapScene() {
             )}
             {picker === "outfit" && (
               <>
-                <div className="modal-title">服装</div>
-                <p className="dim">无属性，仅外观。男女各一版。</p>
+                <p className="dim">只换外观。</p>
                 <div className="row" style={{ marginBottom: 8 }}>
                   <button className={save.lookSex === "male" ? "primary" : ""} onClick={() => setLookSex("male")}>男</button>
                   <button className={save.lookSex === "female" ? "primary" : ""} onClick={() => setLookSex("female")}>女</button>
@@ -206,14 +234,11 @@ export default function FishingMapScene() {
               </>
             )}
             <button onClick={() => setPicker("none")}>关闭</button>
-          </div>
-        </div>
+        </ModalSheet>
       )}
 
       {gate && (
-        <div className="modal-backdrop" onClick={() => setGate(null)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-title">进入 {FISHERY_DEFS.find((f) => f.id === gate)?.name}</div>
+        <ModalSheet title={`进入 ${FISHERY_DEFS.find((f) => f.id === gate)?.name}`} onClose={() => setGate(null)}>
             <button className="primary" onClick={() => {
               if (enterFishery(gate, "card")) setScene("fishing");
               setGate(null);
@@ -232,10 +257,9 @@ export default function FishingMapScene() {
               setGate(null);
             }}>偷偷溜进去</button>
             <button onClick={() => setGate(null)}>取消</button>
-          </div>
-        </div>
+        </ModalSheet>
       )}
-    </div>
+    </Page>
   );
 }
 
