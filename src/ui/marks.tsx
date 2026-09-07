@@ -79,6 +79,49 @@ export function IcoMail({ size = 22 }: { size?: number }) {
   );
 }
 
+export function IcoFriends({ size = 22 }: { size?: number }) {
+  return (
+    <Svg width={size} height={size}>
+      <circle cx="12" cy="11" r="5" fill="#7eb8d8" stroke="#2a1a0c" strokeWidth="2" />
+      <circle cx="21" cy="12" r="4.5" fill="#f0b429" stroke="#2a1a0c" strokeWidth="2" />
+      <path
+        d="M4 26c1.2-5 4.5-7 8-7s6.5 2 8 7"
+        fill="none"
+        stroke="#2a1a0c"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+      <path
+        d="M15 26c1-3.5 3.5-5.5 6.5-5.5S27 22 28 26"
+        fill="none"
+        stroke="#2a1a0c"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </Svg>
+  );
+}
+
+/** 沉浸模式：显示/隐藏水族馆选项。off=true 表示当前已隐藏。 */
+export function IcoEye({ size = 22, off = false }: { size?: number; off?: boolean }) {
+  return (
+    <Svg width={size} height={size}>
+      <path
+        d="M4 16s4.5-8 12-8 12 8 12 8-4.5 8-12 8-12-8-12-8z"
+        fill="#fff6e8"
+        stroke="#2a1a0c"
+        strokeWidth="2.2"
+        strokeLinejoin="round"
+      />
+      <circle cx="16" cy="16" r="4.2" fill="#7eb8d8" stroke="#2a1a0c" strokeWidth="2" />
+      <circle cx="14.6" cy="14.8" r="1.4" fill="#fff" opacity="0.7" />
+      {off && (
+        <path d="M7 9l18 18" stroke="#2a1a0c" strokeWidth="2.6" strokeLinecap="round" />
+      )}
+    </Svg>
+  );
+}
+
 export function IcoQuest({ size = 22 }: { size?: number }) {
   return (
     <Svg width={size} height={size}>
@@ -181,6 +224,36 @@ export function IcoHost({ size = 22 }: { size?: number }) {
   );
 }
 
+export function IcoFishSketch({ size = 22 }: { size?: number }) {
+  return (
+    <Svg width={size} height={size}>
+      <path
+        d="M4 17c7-9 18-10 23-6-1.5 3.5-1.2 7.2 0.8 10.5C16 22 8 19 4 17z"
+        fill="none"
+        stroke="#2a1a0c"
+        strokeWidth="2.2"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M6 16.5 3 18l2.5-1.2"
+        fill="none"
+        stroke="#2a1a0c"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="21" cy="12.5" r="1.4" fill="#2a1a0c" />
+      <path
+        d="M14 14.5c1.2-0.6 2.6-0.9 4-0.8"
+        fill="none"
+        stroke="#c4894a"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+    </Svg>
+  );
+}
+
 export function IcoExpand({ size = 22 }: { size?: number }) {
   return (
     <Svg width={size} height={size}>
@@ -210,6 +283,29 @@ export function IcoPair({ size = 22 }: { size?: number }) {
   );
 }
 
+/** 求偶香：小瓶 + 香气。 */
+export function IcoScent({ size = 22 }: { size?: number }) {
+  return (
+    <Svg width={size} height={size}>
+      <path
+        d="M12 6h8v3c0 6-4 11-8 13-4-2-8-7-8-13V6z"
+        fill="#f0b429"
+        stroke="#2a1a0c"
+        strokeWidth="2"
+        strokeLinejoin="round"
+      />
+      <rect x="14" y="4" width="4" height="3" rx="1" fill="#fff6e8" stroke="#2a1a0c" strokeWidth="1.6" />
+      <path
+        d="M10 10c1.5-2 3.5-2.5 5-1.5M22 8c1-1.5 2.5-1 3 0M20 14c1.2 1 2.8 0.8 3.5-0.5"
+        fill="none"
+        stroke="#ff8ab0"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </Svg>
+  );
+}
+
 export function IcoRelease({ size = 18 }: { size?: number }) {
   return (
     <Svg width={size} height={size}>
@@ -227,6 +323,21 @@ export function IcoFeed({ size = 18 }: { size?: number }) {
       <circle cx="12" cy="16" r="1.6" fill="#2a1a0c" />
       <circle cx="18" cy="19" r="1.4" fill="#2a1a0c" />
       <circle cx="20" cy="15" r="1.2" fill="#2a1a0c" />
+    </Svg>
+  );
+}
+
+export function IcoEncyc({ size = 22 }: { size?: number }) {
+  return (
+    <Svg width={size} height={size}>
+      <path
+        d="M7 5h14a3 3 0 0 1 3 3v17l-3-2-3 2-3-2-3 2-3-2-3 2V8a3 3 0 0 1 3-3z"
+        fill="#fff6e8"
+        stroke="#2a1a0c"
+        strokeWidth="2"
+        strokeLinejoin="round"
+      />
+      <path d="M11 11h10M11 16h8" stroke="#2a1a0c" strokeWidth="2" strokeLinecap="round" />
     </Svg>
   );
 }

@@ -17,6 +17,7 @@ import LoginScene from "./login/LoginScene";
 import SneakScene from "./fishing/SneakScene";
 import LeaderboardScene from "./aquarium/LeaderboardScene";
 import VisitAquariumScene from "./aquarium/VisitAquariumScene";
+import ProfileScene from "./profile/ProfileScene";
 import HudOverlays from "./ui/HudOverlays";
 import AdScene from "./ui/AdScene";
 import TopHud from "./ui/TopHud";
@@ -85,6 +86,7 @@ export default function App() {
             {scene === "sneak" && <SneakScene />}
             {scene === "leaderboard" && <LeaderboardScene />}
             {scene === "visit_aquarium" && <VisitAquariumScene />}
+            {scene === "profile" && <ProfileScene />}
           </>
         )}
       </div>

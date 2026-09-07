@@ -1,4 +1,4 @@
-import { MONTHLY_CARD_DAILY_GOLD } from "../game/constants";
+import { MONTHLY_CARD_DAILY_GOLD, MONTHLY_CARD_DAILY_PEARL } from "../game/constants";
 
 
 
@@ -100,9 +100,11 @@ export const MONTHLY_GOLD_MAIL: MailDef = {
 
   sender: "码头财务",
 
-  body: "你那天没上线，当日 300 金币在附件里。30 天内领走。",
+  body: "你那天没上线，当日 300 金币与 1 珍珠在附件里。30 天内领走。",
 
   gold: MONTHLY_CARD_DAILY_GOLD,
+
+  pearl: MONTHLY_CARD_DAILY_PEARL,
 
   expireDays: 30,
 

@@ -16,7 +16,7 @@ export interface TimedQuestTemplate {
   /** species：指定鱼种。 */
   fishId?: string;
   target: number;
-  rewardGold: number;
+  rewardXp: number;
 }
 
 /** 当期限时任务进度项（写入存档）。 */
@@ -29,7 +29,7 @@ export interface TimedQuestItem {
   fishId?: string;
   progress: number;
   target: number;
-  rewardGold: number;
+  rewardXp: number;
   claimed: boolean;
 }
 
@@ -44,7 +44,7 @@ const FINE_SPECIES = [
 
 const RARE_SPECIES = ["dragon_eye", "gold_trout", "emerald"] as const;
 
-function speciesTemplate(fishId: string, target: number, rewardGold: number): TimedQuestTemplate {
+function speciesTemplate(fishId: string, target: number, rewardXp: number): TimedQuestTemplate {
   const def = FISH_BY_ID[fishId];
   const name = def?.name ?? fishId;
   const q = def ? QUALITY_LABEL[def.quality] : "";
@@ -55,7 +55,7 @@ function speciesTemplate(fishId: string, target: number, rewardGold: number): Ti
     hint: `${q} · 指定鱼种，任意渔场钓到即可。`,
     fishId,
     target,
-    rewardGold,
+    rewardXp,
   };
 }
 
@@ -69,7 +69,7 @@ export function buildTimedQuestItems(seedDay: number): TimedQuestItem[] {
       hint: "7 天内钓 3 条优良及以上品质。",
       minQuality: "fine",
       target: 3,
-      rewardGold: 80,
+      rewardXp: 80,
     },
     {
       id: "tq_rare_1",
@@ -78,7 +78,7 @@ export function buildTimedQuestItems(seedDay: number): TimedQuestItem[] {
       hint: "7 天内钓到 1 条稀有及以上品质。",
       minQuality: "rare",
       target: 1,
-      rewardGold: 100,
+      rewardXp: 100,
     },
   ];
 
@@ -86,9 +86,9 @@ export function buildTimedQuestItems(seedDay: number): TimedQuestItem[] {
   const fi = Math.abs(seedDay) % FINE_SPECIES.length;
   const fi2 = (fi + 2) % FINE_SPECIES.length;
   const ri = Math.abs(seedDay) % RARE_SPECIES.length;
-  templates.push(speciesTemplate(FINE_SPECIES[fi], 1, 40));
-  templates.push(speciesTemplate(FINE_SPECIES[fi2], 2, 60));
-  templates.push(speciesTemplate(RARE_SPECIES[ri], 1, 120));
+  templates.push(speciesTemplate(FINE_SPECIES[fi], 1, 50));
+  templates.push(speciesTemplate(FINE_SPECIES[fi2], 2, 70));
+  templates.push(speciesTemplate(RARE_SPECIES[ri], 1, 110));
 
   return templates.map((t) => ({
     id: t.id,
@@ -99,7 +99,7 @@ export function buildTimedQuestItems(seedDay: number): TimedQuestItem[] {
     fishId: t.fishId,
     progress: 0,
     target: t.target,
-    rewardGold: t.rewardGold,
+    rewardXp: t.rewardXp,
     claimed: false,
   }));
 }

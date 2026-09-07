@@ -10,7 +10,7 @@ import { CharImg, FishPortrait, GearIcon } from "../art/Art";
 import { ART } from "../art/assets";
 import { ModalSheet, Page, PageHead, QualityChip } from "../ui/chrome";
 import { useUi } from "../store/uiStore";
-import { isReturnTrip } from "../game/guide";
+import { mustStoreCatchFish } from "../game/guide";
 
 type Picker = "none" | "bait" | "rod" | "stool" | "basket" | "loadout" | "outfit";
 
@@ -28,22 +28,38 @@ export default function FishingMapScene() {
   const deleteLoadout = useGame((s) => s.deleteLoadout);
   const equipOutfit = useGame((s) => s.equipOutfit);
   const setLookSex = useGame((s) => s.setLookSex);
-  const [picked, setPicked] = useState<string | null>(null);
+  const meetFisheryId = useUi((s) => s.meetFisheryId);
+  const clearMeetFisheryId = useUi((s) => s.clearMeetFisheryId);
+  const [picked, setPicked] = useState<string | null>(() => {
+    const ui = useUi.getState();
+    return ui.meetFisheryId ?? ui.mapPicked ?? useGame.getState().selectedFisheryId ?? null;
+  });
   const [gate, setGate] = useState<string | null>(null);
   const [picker, setPicker] = useState<Picker>("none");
   const [newLoadoutName, setNewLoadoutName] = useState("");
   const setMapPicked = useUi((s) => s.setMapPicked);
-  const uiTripPhase = useUi((s) => s.guideTripPhase);
-  const storeFishMode = isReturnTrip(save.guideTripPhase ?? uiTripPhase);
+  const guideReviewStep = useUi((s) => s.guideReviewStep);
+  const mapLocked =
+    mustStoreCatchFish({
+      questStep: save.questStep,
+      basketCount: save.basket.length,
+      reviewStep: guideReviewStep,
+    }) && !meetFisheryId;
 
   useEffect(() => {
-    if (storeFishMode) setPicked(null);
-  }, [storeFishMode]);
+    if (meetFisheryId) setPicked(meetFisheryId);
+  }, [meetFisheryId]);
 
   useEffect(() => {
-    setMapPicked(storeFishMode ? null : picked);
+    if (mapLocked) setPicked(null);
+  }, [mapLocked]);
+
+  useEffect(() => {
+    setMapPicked(mapLocked ? null : picked);
     return () => setMapPicked(null);
-  }, [picked, setMapPicked, storeFishMode]);
+  }, [picked, setMapPicked, mapLocked]);
+
+  useEffect(() => () => clearMeetFisheryId(), [clearMeetFisheryId]);
 
   const rod = ROD_BY_ID[save.equipped.rod];
   const bait = CONSUMABLE_BY_ID[save.equipped.bait];
@@ -53,11 +69,14 @@ export default function FishingMapScene() {
   const bw = basketWeightKg(save.basket);
 
   function goIn(id: string) {
-    if (storeFishMode) return;
+    if (mapLocked) return;
     const f = FISHERY_DEFS.find((x) => x.id === id);
     if (!f) return;
     if (f.entry.type === "free" || hasFisheryCard(id)) {
-      if (enterFishery(id, "free")) setScene("fishing");
+      if (enterFishery(id, "free")) {
+        clearMeetFisheryId();
+        setScene("fishing");
+      }
       return;
     }
     setGate(id);
@@ -76,9 +95,9 @@ export default function FishingMapScene() {
           const selected = picked === fishery.id;
           const pos = FISHERY_MAP_POS[fishery.id] ?? { left: "40%", top: "40%" };
           const mapGuide =
-            !storeFishMode && fishery.id === "clear_stream" ? "fishery-clear_stream" : undefined;
+            !mapLocked && fishery.id === "clear_stream" ? "fishery-clear_stream" : undefined;
           const enterGuide =
-            !storeFishMode && selected && fishery.id === "clear_stream" ? "enter-fishery" : undefined;
+            !mapLocked && selected && fishery.id === "clear_stream" ? "enter-fishery" : undefined;
           return (
             <div
               key={fishery.id}
@@ -86,7 +105,7 @@ export default function FishingMapScene() {
               data-guide={mapGuide}
               style={{ left: pos.left, top: pos.top }}
               onClick={() => {
-                if (storeFishMode) return;
+                if (mapLocked) return;
                 setPicked(fishery.id);
               }}
               onDoubleClick={() => goIn(fishery.id)}
@@ -240,19 +259,26 @@ export default function FishingMapScene() {
       {gate && (
         <ModalSheet title={`进入 ${FISHERY_DEFS.find((f) => f.id === gate)?.name}`} onClose={() => setGate(null)}>
             <button className="primary" onClick={() => {
-              if (enterFishery(gate, "card")) setScene("fishing");
+              if (enterFishery(gate, "card")) {
+                clearMeetFisheryId();
+                setScene("fishing");
+              }
               setGate(null);
             }}>
               办卡 {FISHERY_DEFS.find((f) => f.id === gate)?.entry.cardPrice} 金
             </button>
             <button onClick={() => {
-              if (enterFishery(gate, "ticket")) setScene("fishing");
+              if (enterFishery(gate, "ticket")) {
+                clearMeetFisheryId();
+                setScene("fishing");
+              }
               setGate(null);
             }}>
               购买门票 {FISHERY_DEFS.find((f) => f.id === gate)?.entry.ticketPrice} 金
             </button>
             <button onClick={() => {
               selectFishery(gate);
+              clearMeetFisheryId();
               setScene("sneak");
               setGate(null);
             }}>偷偷溜进去</button>

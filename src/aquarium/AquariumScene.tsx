@@ -1,13 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useGame } from "../store/gameStore";
 import { FISH_BY_ID } from "../data/fishDefs";
-import { ATTRACTANT_DEFS, attractRemainingDays, bonusLabel } from "../data/attractantDefs";
 import { hostingDailyFee, tankSellPrice } from "../game/economy";
 import { unreadMailCount } from "../game/mail";
+import { demoFishChatThreads } from "../data/chatDefs";
+import { shouldShowFeatureIntro } from "../game/featureIntro";
 import { askConfirm, useUi } from "../store/uiStore";
-import { hatchGoldForParents, HATCH_PEARL, uniquePairs } from "../game/pairing";
+import { fishHealthMax } from "../game/growth";
+import { hatchGoldForParents, HATCH_PEARL } from "../game/pairing";
 import { EXPAND_GOLD, EXPAND_MS, countPlacedSlots, ensureTankSlotArray, occupancy, placedTanks, tankById } from "../game/tanks";
-import { AFFECTION_MAX, canNameFish, fishTitle, FISH_NAME_MAX_LEN } from "../game/affection";
+import { AFFECTION_MAX, fishTitle, FISH_NAME_MAX_LEN } from "../game/affection";
 import TankCanvas from "./TankCanvas";
 import SlotOverflowModal, { SlotPickerModal } from "./SlotModals";
 import { GearIcon } from "../art/Art";
@@ -16,22 +18,26 @@ import {
   ModalSheet,
   NavArrow,
   TankPlaque,
+  GrowthStageChip,
 } from "../ui/chrome";
-import PairRoster from "../ui/PairRoster";
-import { ScentPickerBody, ScentPickerSheet } from "../ui/ScentPicker";
-import { FoodPickerSheet } from "../ui/FoodPicker";
+import { MatePanel } from "../ui/MatePanel";
+import { FeedPanel } from "../ui/FeedPanel";
 import {
   IcoBasket,
   IcoExpand,
+  IcoEye,
   IcoFeed,
+  IcoEncyc,
   IcoHatch,
   IcoHost,
   IcoList,
   IcoMail,
+  IcoFriends,
   IcoName,
   IcoNotes,
   IcoPair,
   IcoQuest,
+  IcoRelease,
   IcoSelect,
   IcoShop,
   IcoEquip,
@@ -39,52 +45,69 @@ import {
   SexIcon,
 } from "../ui/marks";
 
-type Panel = "none" | "host" | "slots" | "slot_manage" | "hatch" | "pairs";
+type Panel = "none" | "host" | "slots" | "slot_manage" | "hatch" | "mate" | "feed";
 
 export default function AquariumScene() {
   const save = useGame((s) => s.save);
   const selectedUid = useGame((s) => s.selectedTankUid);
   const selectedEggUid = useGame((s) => s.selectedEggUid);
   const setScene = useGame((s) => s.setScene);
-  const feed = useGame((s) => s.feed);
+  const equip = useGame((s) => s.equip);
   const renameFish = useGame((s) => s.renameFish);
-  const cleanAllDead = useGame((s) => s.cleanAllDead);
   const setHostedTanks = useGame((s) => s.setHostedTanks);
   const listFromTank = useGame((s) => s.listFromTank);
   const sellFromTank = useGame((s) => s.sellFromTank);
+  const release = useGame((s) => s.release);
   const putTankToBasket = useGame((s) => s.putTankToBasket);
   const selectTankFish = useGame((s) => s.selectTankFish);
+  const selectEgg = useGame((s) => s.selectEgg);
   const switchTank = useGame((s) => s.switchTank);
   const setDefaultTank = useGame((s) => s.setDefaultTank);
   const startExpand = useGame((s) => s.startExpand);
   const finishExpandIfReady = useGame((s) => s.finishExpandIfReady);
-  const unpair = useGame((s) => s.unpair);
-  const applyAttractantToFish = useGame((s) => s.applyAttractantToFish);
-  const applyAttractantToTank = useGame((s) => s.applyAttractantToTank);
-  const hatchEgg = useGame((s) => s.hatchEgg);
+  const moveTankFish = useGame((s) => s.moveTankFish);
+  const renameEgg = useGame((s) => s.renameEgg);
+  const moveEggToTank = useGame((s) => s.moveEggToTank);
+  const sellEggFromTank = useGame((s) => s.sellEggFromTank);
   const accelerateEgg = useGame((s) => s.accelerateEgg);
   const listEgg = useGame((s) => s.listEgg);
+  const flushEggHatch = useGame((s) => s.flushEggHatch);
+  const ackFeatureIntro = useGame((s) => s.ackFeatureIntro);
   const openSlotPicker = useUi((s) => s.openSlotPicker);
   const hubPanel = useUi((s) => s.hubPanel);
   const setHubPanel = useUi((s) => s.setHubPanel);
+  const openFishChat = useUi((s) => s.openFishChat);
+  const guideReviewStep = useUi((s) => s.guideReviewStep);
   const openAd = useUi((s) => s.openAd);
 
   const [panel, setPanel] = useState<Panel>("none");
   const [expandPct, setExpandPct] = useState(0);
   const [listPrice, setListPrice] = useState<number | null>(null);
-  const [sellMenuOpen, setSellMenuOpen] = useState(false);
   const [nameOpen, setNameOpen] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
-  const [fishScentOpen, setFishScentOpen] = useState(false);
+  const [eggNameOpen, setEggNameOpen] = useState(false);
+  const [eggNameDraft, setEggNameDraft] = useState("");
+  const [eggSellOpen, setEggSellOpen] = useState(false);
+  const [sellPickOpen, setSellPickOpen] = useState(false);
+  const [moveTankOpen, setMoveTankOpen] = useState(false);
+  const [moveEggOpen, setMoveEggOpen] = useState(false);
   const [hostPick, setHostPick] = useState<Set<string>>(() => new Set());
-  const feedOpen = useUi((s) => s.feedPickOpen);
-  const setFeedPickOpen = useUi((s) => s.setFeedPickOpen);
+  const [uiHidden, setUiHidden] = useState(false);
+  const pickDismissAfterRef = useRef(0);
+  const feedPanelOpen = useUi((s) => s.feedPanelOpen);
+  const setFeedPanelOpen = useUi((s) => s.setFeedPanelOpen);
+  const scatterFeed = useUi((s) => s.tankScatterFeed);
+  const setTankScatterFeed = useUi((s) => s.setTankScatterFeed);
+  const tankMateSpray = useUi((s) => s.tankMateSpray);
+  const setTankMateSpray = useUi((s) => s.setTankMateSpray);
+  const matePanelOpen = useUi((s) => s.matePanelOpen);
+  const setMatePanelOpen = useUi((s) => s.setMatePanelOpen);
+  const clearMatePick = useUi((s) => s.clearMatePick);
 
   const tank = save.tanks.find((t) => t.id === save.activeTankId);
   const selected = save.tank.find((f) => f.uid === selectedUid && f.tankId === save.activeTankId) ?? null;
   const selectedDef = selected ? FISH_BY_ID[selected.defId] : null;
   const selectedEgg = save.eggs.find((e) => e.uid === selectedEggUid && e.tankId === save.activeTankId) ?? null;
-  const deadCount = save.tank.filter((f) => f.dead && f.tankId === save.activeTankId).length;
   const hostedCount = save.hostedTankIds.length;
   const used = occupancy(save, save.activeTankId);
   const cap = tank?.capacity ?? 0;
@@ -92,6 +115,12 @@ export default function AquariumScene() {
   const slotIds = ensureTankSlotArray(save);
   const slotFree = slotIds.filter((id) => id == null).length;
   const expandBusy = save.expandReadyAt != null;
+
+  useEffect(() => {
+    if (save.eggs.some((e) => e.started && save.gameDay >= e.readyDay)) {
+      flushEggHatch();
+    }
+  }, [flushEggHatch, save.gameDay, save.eggs]);
 
   useEffect(() => {
     const at = save.expandReadyAt;
@@ -112,15 +141,18 @@ export default function AquariumScene() {
     const id = window.setInterval(tick, 50);
     return () => window.clearInterval(id);
   }, [save.expandReadyAt, finishExpandIfReady]);
-  const livingHere = save.tank.filter((f) => !f.dead && f.tankId === save.activeTankId);
-  const eggReady = selectedEgg ? Boolean(selectedEgg.started) && save.gameDay >= selectedEgg.readyDay : false;
-  const eggStarted = Boolean(selectedEgg?.started);
+  const eggDaysLeft = selectedEgg ? Math.max(0, selectedEgg.readyDay - save.gameDay) : 0;
+  const eggHatchDue = Boolean(selectedEgg?.started && save.gameDay >= selectedEgg.readyDay);
+  useEffect(() => {
+    if (panel === "hatch" && (!selectedEgg || eggDaysLeft <= 0)) {
+      if (eggHatchDue) flushEggHatch();
+      setPanel("none");
+    }
+  }, [panel, selectedEgg, eggDaysLeft, eggHatchDue, flushEggHatch]);
   const hatchCost = selectedEgg ? hatchGoldForParents(selectedEgg.parentA, selectedEgg.parentB) : 0;
-  const currentPairs = uniquePairs(livingHere);
-  const fishScentDays = selected ? attractRemainingDays(selected.attractUntilDay, save.gameDay) : 0;
-  const tankScentDays = tank ? attractRemainingDays(tank.tankAttractUntilDay, save.gameDay) : 0;
-  const goldScents = ATTRACTANT_DEFS.filter((a) => a.scope === "fish");
-  const pearlMists = ATTRACTANT_DEFS.filter((a) => a.scope === "tank");
+  const eggDefId = selectedEgg?.defId ?? selectedEgg?.parentA;
+  const eggDef = eggDefId ? FISH_BY_ID[eggDefId] : null;
+  const otherTanks = placedTanks(save).filter((t) => t.id !== save.activeTankId);
 
   useEffect(() => {
     if (hubPanel === "none") return;
@@ -138,15 +170,89 @@ export default function AquariumScene() {
 
   useEffect(() => {
     if (!bar2Fish) {
-      setFishScentOpen(false);
-      setFeedPickOpen(false);
       setNameOpen(false);
+      setMoveTankOpen(false);
     } else if (selected) {
       setNameDraft(selected.customName ?? "");
     }
-  }, [bar2Fish, selected, setFeedPickOpen]);
+  }, [bar2Fish, selected]);
 
-  useEffect(() => () => setFeedPickOpen(false), [setFeedPickOpen]);
+  useEffect(() => {
+    if (!bar2Egg) {
+      setEggNameOpen(false);
+      setEggSellOpen(false);
+      setMoveEggOpen(false);
+    } else if (selectedEgg) {
+      setEggNameDraft(selectedEgg.customName ?? "");
+    }
+  }, [bar2Egg, selectedEgg]);
+
+  useEffect(() => {
+    if (selectedUid || selectedEggUid) {
+      pickDismissAfterRef.current = Date.now() + 500;
+    }
+  }, [selectedUid, selectedEggUid]);
+
+  useEffect(() => {
+    const resume = useUi.getState().aquariumPanelResume;
+    if (!resume) return;
+    useUi.getState().clearAquariumPanelResume();
+    if (resume === "mate") {
+      setPanel("mate");
+      setMatePanelOpen(true);
+    } else if (resume === "feed") {
+      setPanel("feed");
+      setFeedPanelOpen(true);
+    }
+  }, [setMatePanelOpen, setFeedPanelOpen]);
+
+  useEffect(() => () => {
+    if (useUi.getState().aquariumPanelResume) return;
+    setFeedPanelOpen(false);
+    setTankScatterFeed(false);
+    setTankMateSpray(false);
+    setMatePanelOpen(false);
+    clearMatePick();
+  }, [setFeedPanelOpen, setTankScatterFeed, setTankMateSpray, setMatePanelOpen, clearMatePick]);
+
+  function closeFeedPanel() {
+    setPanel("none");
+    setFeedPanelOpen(false);
+  }
+
+  function backAquariumFromFeed(foodId: string) {
+    equip("food", foodId);
+    setPanel("none");
+    setFeedPanelOpen(false);
+    if ((save.foodStock[foodId] ?? 0) <= 0) {
+      useUi.getState().showToast("鱼粮不足");
+      setTankScatterFeed(false);
+      return;
+    }
+    setTankScatterFeed(true);
+  }
+
+  useEffect(() => {
+    if (!scatterFeed) return;
+    const foodId = save.equipped.food;
+    if ((save.foodStock[foodId] ?? 0) <= 0) setTankScatterFeed(false);
+  }, [scatterFeed, save.equipped.food, save.foodStock]);
+
+  function toggleFeedPanel() {
+    if (scatterFeed) {
+      setTankScatterFeed(false);
+      return;
+    }
+    if (feedPanelOpen) {
+      closeFeedPanel();
+      return;
+    }
+    setTankMateSpray(false);
+    setMatePanelOpen(false);
+    clearMatePick();
+    setPanel("feed");
+    setFeedPanelOpen(true);
+  }
 
   useEffect(() => {
     if (panel === "host") {
@@ -154,9 +260,37 @@ export default function AquariumScene() {
     }
   }, [panel, save.hostedTankIds]);
 
-  function closePairs() {
-    setFishScentOpen(false);
+  function closeMatePanel() {
     setPanel("none");
+    setMatePanelOpen(false);
+    setTankMateSpray(false);
+    clearMatePick();
+  }
+
+  function backAquariumFromMate() {
+    setPanel("none");
+    setMatePanelOpen(false);
+    setTankMateSpray(true);
+  }
+
+  function toggleMateSpray() {
+    if (shouldShowFeatureIntro(save, guideReviewStep, "mate")) {
+      ackFeatureIntro("mate");
+    }
+    if (tankMateSpray) {
+      closeMatePanel();
+      return;
+    }
+    setFeedPanelOpen(false);
+    setTankScatterFeed(false);
+    setTankMateSpray(true);
+    setMatePanelOpen(true);
+    setPanel("mate");
+  }
+
+  function openEncyclopedia() {
+    useUi.getState().setEncycReturn("aquarium");
+    setScene("encyclopedia");
   }
 
   function toggleHostTank(id: string) {
@@ -173,125 +307,179 @@ export default function AquariumScene() {
     setPanel("none");
   }
 
-  const fishActionCols = 4 + (selected && canNameFish(selected) ? 1 : 0);
-
-  function goAttractantShop() {
-    closePairs();
-    useUi.getState().openShopTab("attractant");
-    setScene("shop");
+  function dismissTankPick(e: React.MouseEvent) {
+    if (!selectedUid && !selectedEggUid) return;
+    if (Date.now() < pickDismissAfterRef.current) return;
+    const el = e.target as HTMLElement;
+    if (el.closest(".hub-bar2")) return;
+    if (el.closest(".tank-canvas")) return;
+    selectTankFish(null);
+    selectEgg(null);
   }
 
   return (
-    <div className="hub">
-      <div className="hub-top">
-        <NavArrow dir="prev" onClick={() => switchTank(-1)} disabled={placed.length <= 1} />
-        <TankPlaque
-          name={tank?.name ?? "鱼缸"}
-          quality={tank?.quality}
-          used={used}
-          cap={cap}
-        />
-        <NavArrow dir="next" onClick={() => switchTank(1)} disabled={placed.length <= 1} />
-        <button
-          className={`pill ${save.defaultTankId === save.activeTankId ? "primary" : ""}`}
-          onClick={setDefaultTank}
-        >
-          默认
-        </button>
-        <button className="pill" onClick={cleanAllDead} disabled={deadCount === 0}>清理</button>
-      </div>
-
+    <div className={`hub${uiHidden ? " is-ui-hidden" : ""}`}>
       <div className="hub-mid">
         <TankCanvas />
         {tank?.decor && tank.decor !== "none" && <div className={`tank-decor ${tank.decor}`} />}
+        <div className="hub-chrome" onClickCapture={dismissTankPick}>
+        <div className="hub-top-row">
+          <div className="hub-top-row-main">
+            <div className="hub-top">
+              <NavArrow dir="prev" onClick={() => switchTank(-1)} disabled={placed.length <= 1} />
+              <TankPlaque
+                name={tank?.name ?? "鱼缸"}
+                quality={tank?.quality}
+                used={used}
+                cap={cap}
+                onClick={() => setPanel("slots")}
+              />
+              <NavArrow dir="next" onClick={() => switchTank(1)} disabled={placed.length <= 1} />
+              <button
+                className={`pill ${save.defaultTankId === save.activeTankId ? "primary" : ""}`}
+                onClick={setDefaultTank}
+              >
+                默认
+              </button>
+            </div>
+            <div className="hub-top-right-row">
+              <HubFab
+                label={hostedCount > 0 ? "✅托管" : "托管"}
+                active={panel === "host" || hostedCount > 0}
+                onClick={() => setPanel(panel === "host" ? "none" : "host")}
+              >
+                <IcoHost />
+              </HubFab>
+          <HubFab
+            label="渔聊"
+            guide="open-fishchat"
+            badge={demoFishChatThreads().reduce((n, t) => n + t.unread, 0)}
+            onClick={() => openFishChat("msg")}
+          >
+                <IcoFriends />
+              </HubFab>
+              <HubFab label="邮件" badge={unreadMailCount(save)} onClick={() => setScene("mail")}>
+                <IcoMail />
+              </HubFab>
+            </div>
+          </div>
+          <div className="hub-top-right-sub">
+            <div className="hub-top-right-row">
+              <HubFab label="鱼缸" guide="go-select-fish" onClick={() => setScene("select_fish")}><IcoSelect /></HubFab>
+              <HubFab label="鱼筐" badge={save.basket.length} badgeExact guide="open-basket" onClick={() => setScene("store_tank")}><IcoBasket /></HubFab>
+            </div>
+          </div>
+        </div>
         <div className="hub-side left">
-          <HubFab label="邮件" badge={unreadMailCount(save)} onClick={() => setScene("mail")}><IcoMail /></HubFab>
           <HubFab label="任务" onClick={() => setScene("quests")}><IcoQuest /></HubFab>
-          <HubFab label="背包" guide="go-equip" onClick={() => setScene("equipment")}><IcoEquip /></HubFab>
+          <HubFab label="背包" guide="go-equip" onClick={() => { useUi.getState().setStackReturn(null); setScene("equipment"); }}><IcoEquip /></HubFab>
           <HubFab label="笔记" onClick={() => setScene("notes")}><IcoNotes /></HubFab>
         </div>
         <div className="hub-side right">
-          <HubFab label="鱼缸" onClick={() => setScene("select_fish")}><IcoSelect /></HubFab>
-          <HubFab label="鱼筐" badge={save.basket.length} badgeExact guide="open-basket" onClick={() => setScene("store_tank")}><IcoBasket /></HubFab>
-          <HubFab label="托管" active={panel === "host" || hostedCount > 0} onClick={() => setPanel(panel === "host" ? "none" : "host")}>
-            <IcoHost />
+          <HubFab
+            label="图鉴"
+            guide="open-encyc"
+            onClick={openEncyclopedia}
+          >
+            <IcoEncyc />
           </HubFab>
-          <HubFab label="缸位" active={panel === "slots" || panel === "slot_manage"} onClick={() => setPanel(panel === "slots" || panel === "slot_manage" ? "none" : "slots")}>
-            <IcoExpand />
+          <HubFab
+            label={scatterFeed ? "✅喂食" : "喂食"}
+            active={scatterFeed || feedPanelOpen}
+            guide="feed-btn"
+            onClick={toggleFeedPanel}
+          >
+            <IcoFeed />
+          </HubFab>
+          <HubFab
+            label={tankMateSpray ? "✅配偶" : "配偶"}
+            active={tankMateSpray || matePanelOpen}
+            guide="mate-btn"
+            onClick={toggleMateSpray}
+          >
+            <IcoPair />
           </HubFab>
         </div>
         {bar2Fish && selectedDef && selected && (
-          <div className="hub-bar2">
-            <div className="dim" style={{ padding: "0 10px 6px", fontSize: 12 }}>
-              {fishTitle(selected)} <SexIcon sex={selected.sex} /> · 好感 {selected.affection ?? 0}/{AFFECTION_MAX}
-            </div>
-            <div className={`hub-bar2-actions cols-${fishActionCols}`}>
-              <button data-guide="feed-btn" onClick={() => setFeedPickOpen(true)}><IcoFeed />喂食</button>
+          <div className="hub-bar2" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className="dim hub-bar2-title"
+              onClick={() => setNameOpen(true)}
+            >
+              {fishTitle(selected)} <SexIcon sex={selected.sex} /> <GrowthStageChip healthMax={fishHealthMax(selected)} /> · 健康 {selected.health}/{fishHealthMax(selected)} · 好感 {selected.affection ?? 0}/{AFFECTION_MAX}
+            </button>
+            <div className="hub-bar2-actions cols-5">
+              <button onClick={() => setNameOpen(true)}>
+                <IcoName />{selected.customName ? "改名" : "起名"}
+              </button>
+              <button onClick={() => setMoveTankOpen(true)}>
+                <IcoExpand />换缸
+              </button>
               <button
+                data-guide="store-to-basket"
                 onClick={() => {
                   if (putTankToBasket([selected.uid])) selectTankFish(null);
                 }}
               >
                 <IcoBasket />存筐
               </button>
-              <button
-                onClick={() => {
-                  if (selected.pairId) {
-                    setPanel("pairs");
-                  } else {
-                    setFishScentOpen(true);
-                  }
-                }}
-              >
-                <IcoPair />
-                {selected.pairId ? "配偶表" : "配偶"}
-              </button>
-              <button onClick={() => setSellMenuOpen(true)}>
+              <button onClick={() => setSellPickOpen(true)}>
                 <IcoList />售卖
               </button>
-              {canNameFish(selected) && (
-                <button onClick={() => setNameOpen(true)}>
-                  <IcoName />
-                  {selected.customName ? "改名" : "起名"}
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-        {bar2Egg && selectedEgg && (
-          <div className="hub-bar2">
-            <div className="hub-bar2-name">
-              <IcoHatch size={28} />
-              <div className="sheet-meta">
-                <div className="sheet-name-row">
-                  鱼卵（{FISH_BY_ID[selectedEgg.parentA]?.name} × {FISH_BY_ID[selectedEgg.parentB]?.name}）
-                </div>
-                <span className="dim">
-                  {!eggStarted
-                    ? "未开工"
-                    : eggReady
-                      ? "可以领苗"
-                      : `还要 ${selectedEgg.readyDay - save.gameDay} 天`}
-                </span>
-              </div>
-            </div>
-            <div className="hub-bar2-actions cols-2">
-              <button className="primary" onClick={() => setPanel("hatch")}><IcoHatch />孵化</button>
               <button
+                className="danger"
                 onClick={() =>
                   askConfirm({
-                    title: "确认挂售",
-                    message: `确定把这枚鱼卵挂到鱼行，售价 ${Math.max(2, hatchCost)} 金？`,
-                    confirmLabel: "挂售",
-                    onConfirm: () => listEgg(selectedEgg.uid, Math.max(2, hatchCost)),
+                    title: "确认放生",
+                    message: `确定放生「${fishTitle(selected)}」？放生后无法找回。`,
+                    confirmLabel: "放生",
+                    danger: true,
+                    onConfirm: () => release(selected.uid),
                   })
                 }
               >
-                <IcoList />挂售
+                <IcoRelease />放生
               </button>
             </div>
           </div>
         )}
+        {bar2Egg && selectedEgg && eggDef && (
+          <div className="hub-bar2" onClick={(e) => e.stopPropagation()}>
+            <div className="dim" style={{ padding: "0 10px 6px", fontSize: 12 }}>
+              {selectedEgg.customName ? `${selectedEgg.customName} · ` : ""}
+              {eggDef.name}
+              {eggDaysLeft > 0 ? ` · 还要 ${eggDaysLeft} 天孵化` : " · 孵化中"}
+            </div>
+            <div className="hub-bar2-actions cols-4">
+              <button onClick={() => setEggNameOpen(true)} data-guide="egg-name"><IcoName />起名</button>
+              <button
+                onClick={() => {
+                  if (eggHatchDue) {
+                    flushEggHatch();
+                    return;
+                  }
+                  setPanel("hatch");
+                }}
+              >
+                <IcoHatch />加速孵化
+              </button>
+              <button onClick={() => setMoveEggOpen(true)}><IcoExpand />换缸</button>
+              <button onClick={() => setEggSellOpen(true)}><IcoList />售卖</button>
+            </div>
+          </div>
+        )}
+        </div>
+        <button
+          type="button"
+          className="hub-ui-toggle"
+          title={uiHidden ? "显示选项" : "隐藏选项"}
+          aria-label={uiHidden ? "显示选项" : "隐藏选项"}
+          aria-pressed={uiHidden}
+          onClick={() => setUiHidden((v) => !v)}
+        >
+          <IcoEye size={20} off={uiHidden} />
+        </button>
       </div>
 
       {panel === "host" && (
@@ -393,89 +581,145 @@ export default function AquariumScene() {
       <SlotPickerModal />
       <SlotOverflowModal />
 
-      {panel === "pairs" && (
-        <ModalSheet title="配偶表" onClose={closePairs} wide modalClassName="pairs-sheet">
-            <div className="pairs-sheet-main">
-              <p className="dim">同缸会自动配对，配偶会下卵。</p>
-              {tankScentDays > 0 && (
-                <p>整缸香氛还剩 {tankScentDays} 天{tank ? ` · ${bonusLabel(tank.tankAttractBonus)}` : ""}</p>
-              )}
-              {currentPairs.length === 0 && <p className="dim">还没有配偶。</p>}
-              <PairRoster
-                pairs={currentPairs}
-                ownedBooks={save.ownedBooks}
-                onUnpair={(id) => unpair(id)}
-              />
-              {selected && selectedDef && !selected.dead ? (
-                <button type="button" className="primary" onClick={() => setFishScentOpen(true)}>
-                  给 {selectedDef.name} 用求偶香
-                  {fishScentDays > 0 ? `（身上还剩 ${fishScentDays} 天）` : ""}
-                </button>
-              ) : (
-                <p className="dim">先点缸里一条活鱼。</p>
-              )}
-            </div>
-            <div className="dim">珍珠香氛 · 喷整缸</div>
-            <ScentPickerBody
-              items={pearlMists}
-              stock={save.attractantStock}
-              onUse={applyAttractantToTank}
-              onShop={goAttractantShop}
-            />
-            <button type="button" onClick={closePairs}>关闭</button>
-        </ModalSheet>
-      )}
-      {feedOpen && selected && selectedDef && !selected.dead && (
-        <FoodPickerSheet
-          title="喂食"
-          hint="选对口鱼粮。不对会嫌弃，不扣粮。"
-          stock={save.foodStock}
-          matchQualities={[selectedDef.quality]}
-          onUse={(id) => {
-            setFeedPickOpen(false);
-            feed(selected.uid, id);
-          }}
+      {panel === "mate" && matePanelOpen && (
+        <MatePanel
+          lots={save.attractantLots ?? []}
+          onBackAquarium={backAquariumFromMate}
           onShop={() => {
-            setFeedPickOpen(false);
+            useUi.getState().openAquariumShopFromPanel("mate");
+            useUi.getState().openShopTab("attractant");
+            setScene("shop");
+          }}
+          onClose={closeMatePanel}
+        />
+      )}
+      {panel === "feed" && feedPanelOpen && (
+        <FeedPanel
+          stock={save.foodStock}
+          equippedFoodId={save.equipped.food}
+          matchQualities={selectedDef ? [selectedDef.quality] : undefined}
+          guideFeed={save.started && !save.guideSkipped && save.questStep === "q_feed"}
+          onBackAquarium={backAquariumFromFeed}
+          onShop={() => {
+            useUi.getState().openAquariumShopFromPanel("feed");
             useUi.getState().openShopTab("food");
             setScene("shop");
           }}
-          onClose={() => setFeedPickOpen(false)}
+          onClose={closeFeedPanel}
         />
       )}
-      {fishScentOpen && selected && selectedDef && !selected.dead && (
-        <ScentPickerSheet
-          title="配偶"
-          hint={`给 ${fishTitle(selected)} 用求偶香。${fishScentDays > 0 ? `还剩 ${fishScentDays} 天。` : ""}`}
-          items={goldScents}
-          stock={save.attractantStock}
-          onUse={(id) => applyAttractantToFish(selected.uid, id)}
-          onShop={goAttractantShop}
-          onClose={() => setFishScentOpen(false)}
-        />
+      {moveTankOpen && selected && (
+        <ModalSheet title="换缸" onClose={() => setMoveTankOpen(false)}>
+          {otherTanks.length === 0 ? (
+            <p className="dim">只有一口缸。扩建后再买新缸。</p>
+          ) : (
+            <div className="tank-target-scroll">
+              {otherTanks.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  className="primary"
+                  onClick={() => {
+                    if (moveTankFish([selected.uid], t.id)) {
+                      setMoveTankOpen(false);
+                      selectTankFish(null);
+                    }
+                  }}
+                >
+                  换到 {t.name}（{occupancy(save, t.id)}/{t.capacity}）
+                </button>
+              ))}
+            </div>
+          )}
+          <button type="button" onClick={() => setMoveTankOpen(false)}>关闭</button>
+        </ModalSheet>
+      )}
+      {moveEggOpen && selectedEgg && (
+        <ModalSheet title="卵换缸" onClose={() => setMoveEggOpen(false)}>
+          {otherTanks.length === 0 ? (
+            <p className="dim">只有一口缸。</p>
+          ) : (
+            <div className="tank-target-scroll">
+              {otherTanks.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  className="primary"
+                  onClick={() => {
+                    if (moveEggToTank(selectedEgg.uid, t.id)) setMoveEggOpen(false);
+                  }}
+                >
+                  换到 {t.name}
+                </button>
+              ))}
+            </div>
+          )}
+          <button type="button" onClick={() => setMoveEggOpen(false)}>关闭</button>
+        </ModalSheet>
+      )}
+      {eggNameOpen && selectedEgg && (
+        <ModalSheet title={selectedEgg.customName ? "卵改名" : "卵起名"} onClose={() => setEggNameOpen(false)}>
+          <input
+            value={eggNameDraft}
+            maxLength={FISH_NAME_MAX_LEN}
+            placeholder="给这枚卵起个名字"
+            onChange={(e) => setEggNameDraft(e.target.value)}
+          />
+          <button
+            className="primary"
+            onClick={() => {
+              if (renameEgg(selectedEgg.uid, eggNameDraft)) setEggNameOpen(false);
+            }}
+          >
+            确定
+          </button>
+          <button onClick={() => setEggNameOpen(false)}>取消</button>
+        </ModalSheet>
+      )}
+      {eggSellOpen && selectedEgg && eggDef && (
+        <ModalSheet title={`售卖 ${eggDef.name}卵`} onClose={() => setEggSellOpen(false)}>
+          <p className="dim">销售立刻换成金币；挂售放到鱼行等别人买。</p>
+          <button
+            className="primary"
+            onClick={() => {
+              const price = Math.max(2, Math.floor(hatchCost * 0.65));
+              askConfirm({
+                title: "确认销售",
+                message: `立刻卖掉这枚卵，到手 ${price} 金？`,
+                confirmLabel: "销售",
+                onConfirm: () => {
+                  sellEggFromTank(selectedEgg.uid);
+                  setEggSellOpen(false);
+                },
+              });
+            }}
+          >
+            销售
+          </button>
+          <button
+            onClick={() =>
+              askConfirm({
+                title: "确认挂售",
+                message: `确定把这枚鱼卵挂到鱼行，售价 ${Math.max(2, hatchCost)} 金？`,
+                confirmLabel: "挂售",
+                onConfirm: () => {
+                  listEgg(selectedEgg.uid, Math.max(2, hatchCost));
+                  setEggSellOpen(false);
+                },
+              })
+            }
+          >
+            挂售
+          </button>
+          <button onClick={() => setEggSellOpen(false)}>取消</button>
+        </ModalSheet>
       )}
 
-      {panel === "hatch" && selectedEgg && (
-        <ModalSheet title="孵化" onClose={() => setPanel("none")}>
-            <p className="dim">开工后等几天。珍珠或广告可加速。</p>
-            <p>
-              {!eggStarted
-                ? "还没开工"
-                : eggReady
-                  ? "已经可以领苗"
-                  : `还要 ${selectedEgg.readyDay - save.gameDay} 天`}
-            </p>
-            {!eggStarted ? (
-              <button className="primary" onClick={() => { hatchEgg(selectedEgg.uid); }}>
-                开工 {hatchCost}金
-              </button>
-            ) : (
-              <button className="primary" disabled={!eggReady} onClick={() => { if (hatchEgg(selectedEgg.uid)) setPanel("none"); }}>
-                领苗
-              </button>
-            )}
-            <button disabled={!eggStarted || eggReady} onClick={() => accelerateEgg(selectedEgg.uid, "pearl")}>珍珠加速 {HATCH_PEARL}</button>
-            <button disabled={!eggStarted || eggReady} onClick={() => openAd({ kind: "egg", uid: selectedEgg.uid })}>看广告加速</button>
+      {panel === "hatch" && selectedEgg && eggDaysLeft > 0 && (
+        <ModalSheet title="加速孵化" onClose={() => setPanel("none")}>
+            <p className="dim">还要 {eggDaysLeft} 天自动孵化。珍珠或广告可加速 1 天。</p>
+            <button onClick={() => accelerateEgg(selectedEgg.uid, "pearl")}>珍珠加速 {HATCH_PEARL}</button>
+            <button onClick={() => openAd({ kind: "egg", uid: selectedEgg.uid })}>看广告加速</button>
             <button onClick={() => setPanel("none")}>关闭</button>
         </ModalSheet>
       )}
@@ -495,7 +739,7 @@ export default function AquariumScene() {
 
       {nameOpen && selected && selectedDef && (
         <ModalSheet title={selected.customName ? "改名" : "起名"} onClose={() => setNameOpen(false)}>
-          <p className="dim">好感满 {AFFECTION_MAX} 后可以起名，最多 {FISH_NAME_MAX_LEN} 个字。</p>
+          <p className="dim">最多 {FISH_NAME_MAX_LEN} 个字。</p>
           <input
             value={nameDraft}
             maxLength={FISH_NAME_MAX_LEN}
@@ -514,36 +758,33 @@ export default function AquariumScene() {
         </ModalSheet>
       )}
 
-      {sellMenuOpen && selected && selectedDef && (
-        <ModalSheet title={`售卖 ${fishTitle(selected)}`} onClose={() => setSellMenuOpen(false)}>
+      {sellPickOpen && selected && selectedDef && (
+        <ModalSheet title={`售卖 ${fishTitle(selected)}`} onClose={() => setSellPickOpen(false)}>
           <p className="dim">销售立刻换成金币；挂售放到鱼行等别人买。</p>
+          <button
+            onClick={() => {
+              setSellPickOpen(false);
+              setListPrice(tankSellPrice(selectedDef.sellPrice, fishHealthMax(selected), false) ?? selectedDef.sellPrice);
+            }}
+          >
+            挂售
+          </button>
           <button
             className="primary"
             onClick={() => {
-              const price = tankSellPrice(selectedDef.sellPrice, selected.health, false);
+              const price = tankSellPrice(selectedDef.sellPrice, fishHealthMax(selected), false);
               if (price == null) return;
+              setSellPickOpen(false);
               askConfirm({
                 title: "确认销售",
                 message: `立刻卖掉「${fishTitle(selected)}」，到手 ${price} 金？`,
                 confirmLabel: "销售",
-                onConfirm: () => {
-                  sellFromTank(selected.uid);
-                  setSellMenuOpen(false);
-                },
+                onConfirm: () => sellFromTank(selected.uid),
               });
             }}
           >
             销售
           </button>
-          <button
-            onClick={() => {
-              setSellMenuOpen(false);
-              setListPrice(tankSellPrice(selectedDef.sellPrice, selected.health, false) ?? selectedDef.sellPrice);
-            }}
-          >
-            挂售
-          </button>
-          <button onClick={() => setSellMenuOpen(false)}>取消</button>
         </ModalSheet>
       )}
 

@@ -2,7 +2,7 @@ import type { SaveData } from "../save/saveSchema";
 import { FISH_BY_ID } from "../data/fishDefs";
 import { basketFits, genUid } from "./fishingLogic";
 import { breakPair } from "./pairing";
-import { ensureTankSlotArray, tankById } from "./tanks";
+import { ensureTankSlotArray, occupancy, tankById } from "./tanks";
 
 export type SlotOverflow = {
   slotIndex: number;
@@ -27,7 +27,8 @@ export function checkSlotAssignOverflow(
   const toTank = tankById(save, toTankId);
   if (!toTank) return null;
   const fish = livingFishInTank(save, fromTankId);
-  if (fish.length <= toTank.capacity) return null;
+  const used = occupancy(save, fromTankId);
+  if (used <= toTank.capacity) return null;
   return {
     slotIndex,
     fromTankId,
@@ -78,6 +79,8 @@ export function applySlotAssign(
         loveView: f.loveView,
         sex: f.sex,
         health: f.health,
+        healthMax: f.healthMax,
+        bodyBulk: f.bodyBulk,
         lastFedDay: f.lastFedDay,
         affection: f.affection,
         customName: f.customName,
@@ -85,8 +88,8 @@ export function applySlotAssign(
       save.tank = save.tank.filter((x) => x.uid !== uid);
     }
 
-    const remaining = livingFishInTank(save, fromTankId);
-    if (remaining.length > toTank.capacity) {
+    const used = occupancy(save, fromTankId);
+    if (used > toTank.capacity) {
       return { ok: false, reason: "鱼儿数量超出新鱼缸容量！" };
     }
 

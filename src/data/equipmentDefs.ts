@@ -23,7 +23,7 @@ export const PART_STAT = {
 
 type SlotNames = Record<RodPartSlot, string>;
 
-/** 玩家滑块默认尺寸。板凳/书籍在此之上加法，不乘手杆系数（ADR-019）。 */
+/** 玩家滑块默认尺寸；手杆系数 `c` 乘此底值，书籍在此之上加法（ADR-019）。 */
 export const PLAYER_SLIDER_BASE = 0.22;
 
 export function fmtMul(stat: string, n: number): string {
@@ -268,11 +268,26 @@ export function partStatHint(part: RodPartDef): string {
 }
 
 export function rodShopHint(rod: RodDef): string {
-  return fmtMul("手杆系数", rod.coefficient);
+  return fmtMul("滑块", rod.coefficient);
 }
 
 export function stoolHint(stool: StoolDef): string {
-  return fmtMul("玩家滑块", (PLAYER_SLIDER_BASE + stool.playerSliderBonus) / PLAYER_SLIDER_BASE);
+  if (stool.idleStaminaDiscount) {
+    return `挂机体力消耗 -${Math.round(stool.idleStaminaDiscount * 100)}%`;
+  }
+  if (stool.catchXpBonus) {
+    return `钓鱼经验 +${Math.round(stool.catchXpBonus * 100)}%`;
+  }
+  return "无加成";
+}
+
+/** 商城 / 装备页顶栏说明。 */
+export function rodGearBlurb(): string {
+  return "手杆决定玩家滑块大小，并给渔线轮、鱼线、鱼钩、浮漂乘系数。";
+}
+
+export function stoolGearBlurb(): string {
+  return "木板凳减挂机体力消耗，折叠凳加钓鱼经验；每条板凳只有一种效果。";
 }
 
 export function basketShopHint(basket: BasketDef): string {
@@ -286,7 +301,7 @@ export const STOOL_DEFS: StoolDef[] = [
     quality: "common",
     price: 0,
     currency: "gold",
-    playerSliderBonus: 0,
+    idleStaminaDiscount: 0.15,
   },
   {
     id: "stool_folding",
@@ -294,7 +309,7 @@ export const STOOL_DEFS: StoolDef[] = [
     quality: "fine",
     price: 60,
     currency: "gold",
-    playerSliderBonus: 0.04,
+    catchXpBonus: 0.2,
   },
 ];
 

@@ -109,17 +109,6 @@ function Tree({
   );
 }
 
-function Sun({ x, y, s = 1 }: { x: number; y: number; s?: number }) {
-  return (
-    <g className="db-sun" transform={`translate(${x} ${y}) scale(${s})`}>
-      <circle r="54" fill="#ffe08a" opacity="0.28" />
-      <circle r="34" fill="#ffe9a8" />
-      <circle r="24" fill="#fff6c8" />
-      <circle cx="-8" cy="-6" r="8" fill="#fff" opacity="0.35" />
-    </g>
-  );
-}
-
 function Cattail({ x, y, s = 1 }: { x: number; y: number; s?: number }) {
   return (
     <g transform={`translate(${x} ${y}) scale(${s})`}>
@@ -291,7 +280,6 @@ export default function DockBackdrop({
       </defs>
 
       <rect width={W} height="560" fill="url(#db-sky)" />
-      <Sun x={stream ? 2920 : 2680} y={stream ? 108 : 124} s={stream ? 0.78 : 1} />
       {CLOUDS.map((c) => (
         <Cloud key={`${c.cx}-${c.cy}`} {...c} />
       ))}

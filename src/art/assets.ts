@@ -16,6 +16,7 @@ export const ART = {
     luck: "/art/icon_luck.png",
   },
   fxRage: "/art/fx_rage.png",
+  fishSliderDoodle: "/art/fish_slider_doodle.png",
 } as const;
 
 export type GearIconKind = keyof typeof ART.icon;

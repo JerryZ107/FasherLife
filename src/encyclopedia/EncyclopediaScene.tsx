@@ -6,10 +6,15 @@ import { FISHERY_BY_ID } from "../data/fisheryDefs";
 import { CONSUMABLE_BY_ID } from "../data/consumableDefs";
 import { QUALITY_LABEL, QUALITY_ORDER, type Quality } from "../types";
 import { EmptyHint, ModalSheet, Page, PageBody, PageHead, QualityChip } from "../ui/chrome";
+import { useUi } from "../store/uiStore";
 
 export default function EncyclopediaScene() {
   const setScene = useGame((s) => s.setScene);
   const notifyQuest = useGame((s) => s.notifyQuest);
+  const encycReturn = useUi((s) => s.encycReturn);
+  const setEncycReturn = useUi((s) => s.setEncycReturn);
+  const caughtFishIds = useGame((s) => s.save.caughtFishIds);
+  const unlockedSet = useMemo(() => new Set(caughtFishIds), [caughtFishIds]);
   const [query, setQuery] = useState("");
   const [applied, setApplied] = useState("");
   const [showFilter, setShowFilter] = useState(false);
@@ -29,7 +34,12 @@ export default function EncyclopediaScene() {
 
   function leave() {
     notifyQuest("read_encyc");
-    setScene("equipment");
+    const back =
+      encycReturn === "profile" || encycReturn === "equipment" || encycReturn === "aquarium"
+        ? encycReturn
+        : "aquarium";
+    setEncycReturn(null);
+    setScene(back);
   }
 
   const visible = FISH_DEFS.filter((f) => {
@@ -40,9 +50,17 @@ export default function EncyclopediaScene() {
     return true;
   });
 
+  const backLabel =
+    encycReturn === "profile" ? "主页" : encycReturn === "equipment" ? "书籍" : "水族馆";
+
   return (
     <Page>
-      <PageHead onBack={leave} backLabel="书籍" title={`图鉴 · ${FISH_DEFS.length}`} backGuide="encyc-back" />
+      <PageHead
+        onBack={leave}
+        backLabel={backLabel}
+        title={`图鉴 · ${FISH_DEFS.length}`}
+        backGuide="encyc-back"
+      />
       <div className="search-bar">
         <input placeholder="搜索鱼名" value={query} onChange={(e) => setQuery(e.target.value)} />
         <button className="primary" onClick={() => setApplied(query.trim())}>搜索</button>
@@ -82,6 +100,7 @@ export default function EncyclopediaScene() {
         {visible.map((f) => {
           const fishery = FISHERY_BY_ID[f.fisheryId];
           const bait = CONSUMABLE_BY_ID[f.preferredBaitId];
+          const unlocked = unlockedSet.has(f.id);
           return (
             <div className="panel ency-card" key={f.id}>
               <div className="row-between">
@@ -89,7 +108,7 @@ export default function EncyclopediaScene() {
                 <QualityChip quality={f.quality} />
               </div>
               <div className="ency-art">
-                <FishPortrait id={f.id} size={88} alt={f.name} />
+                <FishPortrait id={f.id} size={88} alt={f.name} locked={!unlocked} />
               </div>
               <div className="dim" style={{ fontSize: 11 }}>
                 <div>水域：{fishery?.name}</div>

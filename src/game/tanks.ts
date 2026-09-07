@@ -1,6 +1,7 @@
 import type { Quality, Personality, LoveView, Sex } from "../types";
-import type { PlayerTank, SaveData, TankFish, TankEgg } from "../save/saveSchema";
+import type { PlayerTank, SaveData, TankFish, TankEgg, BasketFish } from "../save/saveSchema";
 import { capacityForQuality } from "../data/tankDefs";
+import { ADULT_HEALTH_MAX, CAUGHT_FISH_HEALTH, MATE_GROWTH_MAX } from "./growth";
 
 export const STARTER_TANK_ID = "tank_a";
 export const STARTER_TANK_QUALITY: Quality = "common";
@@ -11,6 +12,11 @@ export const STARTER_TANK_SLOTS = 1;
 export const EXPAND_STEP = 1;
 export const EXPAND_GOLD = 120;
 export const EXPAND_MS = 3000;
+
+/** 主缸视口：普通 1 屏，优良及以上 2 屏可左右拖动。 */
+export function tankViewSpan(quality: Quality): 1 | 2 {
+  return quality === "common" ? 1 : 2;
+}
 
 export function starterTanks(): PlayerTank[] {
   return [
@@ -38,7 +44,9 @@ export function starterFish(): TankFish[] {
   ): TankFish => ({
     uid,
     defId,
-    health: 100,
+    health: CAUGHT_FISH_HEALTH,
+    healthMax: ADULT_HEALTH_MAX,
+    mateRestUntilDay: 0,
     dead: false,
     lastFedDay: -1,
     lastSettledAt: now,
@@ -64,20 +72,9 @@ export function starterFish(): TankFish[] {
   ];
 }
 
-/** 新存档赠送的 1 枚普通卵（青鱼 × 河豚）。 */
+/** 新存档不赠送鱼卵。 */
 export function starterEggs(): TankEgg[] {
-  return [
-    {
-      uid: "s_egg_1",
-      tankId: STARTER_TANK_ID,
-      pairId: "s_pair_1",
-      parentA: "black_carp",
-      parentB: "puffer",
-      laidDay: 0,
-      readyDay: 0,
-      started: false,
-    },
-  ];
+  return [];
 }
 
 export function tankLetter(index: number): string {
@@ -162,8 +159,22 @@ export function livingInFilter(save: SaveData, tankFilter: string) {
   return save.tank.filter((f) => !f.dead && (tankFilter === ALL_TANKS || f.tankId === tankFilter));
 }
 
+/** 鱼苗不占缸容量；小鱼（上限≥60）与成鱼计入。 */
+export function fishCountsTowardTankCapacity(fish: Pick<TankFish, "dead" | "healthMax">): boolean {
+  if (fish.dead) return false;
+  return (fish.healthMax ?? ADULT_HEALTH_MAX) >= MATE_GROWTH_MAX;
+}
+
+export function basketFishCountsTowardCapacity(bf: Pick<BasketFish, "healthMax">): boolean {
+  return (bf.healthMax ?? ADULT_HEALTH_MAX) >= MATE_GROWTH_MAX;
+}
+
+export function capacityNeedForFishUids(save: SaveData, uids: string[]): number {
+  return save.tank.filter((f) => uids.includes(f.uid) && fishCountsTowardTankCapacity(f)).length;
+}
+
 export function occupancy(save: SaveData, tankId: string): number {
-  return save.tank.filter((f) => f.tankId === tankId).length;
+  return save.tank.filter((f) => f.tankId === tankId && fishCountsTowardTankCapacity(f)).length;
 }
 
 export function tankHasRoom(save: SaveData, tankId: string, extra = 1): boolean {

@@ -40,7 +40,7 @@ button {
   transition: filter 0.15s, transform 0.1s;
 }
 button:hover:not(:disabled) { filter: brightness(1.12); }
-button:active:not(:disabled) { transform: translateY(2px); box-shadow: 0 1px 0 #2a1a0c; }
+button:active:not(:disabled):not(.modal-close-x) { transform: translateY(2px); box-shadow: 0 1px 0 #2a1a0c; }
 button:disabled { opacity: 0.4; cursor: not-allowed; }
 button.primary {
   background: linear-gradient(#ffe08a, #f0b429);
@@ -243,13 +243,44 @@ input {
   flex-direction: column;
   height: 100%;
 }
+.hub-top-row {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  z-index: 4;
+}
+.hub-top-row-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.hub-top-right-sub {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
 .hub-top {
   display: flex;
   gap: 6px;
   align-items: center;
+  width: max-content;
+  max-width: min(100%, calc(100% - 200px));
   padding: 6px 8px;
-  background: linear-gradient(#7a4e28, #4a311c);
-  z-index: 2;
+  flex-shrink: 1;
+  min-width: 0;
+}
+.hub-top-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
 }
 .hub-mid {
   flex: 1;
@@ -280,6 +311,24 @@ input {
 }
 .hub-side.left { left: 8px; }
 .hub-side.right { right: 8px; }
+.hub.is-ui-hidden .hub-chrome {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.hub-ui-toggle {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 6;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+}
 .hub-side button {
   width: 52px;
   padding: 10px 0;
@@ -383,7 +432,9 @@ input {
   flex: none;
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 6px;
+  width: 100%;
   padding: 6px 10px 0;
   pointer-events: none;
 }
@@ -469,10 +520,22 @@ input {
 }
 .monthly-gold-amt {
   margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
   font-family: var(--display);
   font-size: 28px;
   color: #ffd166;
   text-shadow: 0 2px 0 #24160c;
+}
+.monthly-gold-amt-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.monthly-gold-amt-row .mark {
+  flex-shrink: 0;
 }
 .monthly-gold-pile {
   width: 96px;
@@ -625,6 +688,22 @@ input {
 .hub-bar2-actions.cols-5 {
   grid-template-columns: repeat(5, 1fr);
 }
+.hub-bar2-actions.cols-6 {
+  grid-template-columns: repeat(6, 1fr);
+}
+.hub-bar2-actions.cols-7 {
+  grid-template-columns: repeat(7, 1fr);
+}
+.hub-bar2-title {
+  display: block;
+  width: 100%;
+  padding: 0 10px 6px;
+  font-size: 12px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
 
 .host-tank-pick {
   display: flex;
@@ -763,7 +842,15 @@ input {
   object-fit: contain;
 }
 .fish-portrait.is-locked {
-  filter: grayscale(1) brightness(0.35);
+  position: relative;
+}
+.fish-portrait.is-locked::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: rgba(24, 24, 26, 0.9);
+  pointer-events: none;
 }
 .fish-portrait.is-blush {
   box-shadow: 0 0 0 3px rgba(255, 120, 150, 0.55);
@@ -1052,6 +1139,18 @@ input {
   border: 1px solid rgba(196, 137, 74, 0.45);
   color: var(--text-dim);
 }
+.sneak-win-modal {
+  width: min(92vw, 340px);
+}
+.sneak-win-modal .modal-title {
+  padding-right: 28px;
+  font-size: 22px;
+  line-height: 1.4;
+  letter-spacing: 0.04em;
+}
+.sneak-win-modal .modal-scroll > button {
+  width: 100%;
+}
 .joystick {
   position: absolute;
   left: 50%;
@@ -1093,6 +1192,16 @@ input {
   cursor: grab;
   pointer-events: auto;
 }
+.dock-sun-fixed {
+  position: absolute;
+  top: 10px;
+  right: 14px;
+  width: 88px;
+  height: 88px;
+  z-index: 2;
+  pointer-events: none;
+  filter: drop-shadow(0 0 12px rgba(255, 224, 138, 0.35));
+}
 .dock-world {
   height: 100%;
   position: relative;
@@ -1120,15 +1229,11 @@ input {
 .dock-backdrop .db-wave.w3 { animation-duration: 8.4s; }
 .dock-backdrop .db-foam { animation: dock-wave 3.2s ease-in-out infinite; }
 .dock-backdrop .db-lily { animation: lily-bob 3.8s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
-.dock-backdrop .db-sun { animation: db-sun 8s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
 .dock-backdrop .db-leap {
   opacity: 0;
   animation: fish-leap 6.4s ease-in-out infinite;
   transform-box: fill-box;
   transform-origin: center;
-}
-@keyframes db-sun {
-  50% { transform: scale(1.04); }
 }
 @keyframes fish-leap {
   0%, 68%, 100% { opacity: 0; transform: translate(0, 8px) rotate(0); }
@@ -1267,27 +1372,138 @@ input {
 .angler.is-you { z-index: 6; }
 .angler-name {
   position: absolute;
-  top: 16px;
-  left: 0;
-  transform: translateX(-88%);
+  top: 44px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
   font-size: 11px;
   font-weight: 700;
   color: #fff6e8;
   background: rgba(36, 22, 12, 0.82);
   border: 2px solid #24160c;
   border-radius: 999px;
-  padding: 1px 8px;
+  padding: 2px 8px;
   white-space: nowrap;
   z-index: 6;
+  text-align: center;
 }
 .angler.is-you .angler-name {
   color: var(--accent);
   border-color: var(--accent);
 }
+.angler-presence {
+  display: inline-block;
+  margin-left: 0;
+  padding: 1px 5px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.3;
+  vertical-align: middle;
+}
+.angler-presence.is-online {
+  color: #1a3d2a;
+  background: #9ee8b8;
+}
+.angler-presence.is-idle {
+  color: #5a3a00;
+  background: #ffd166;
+}
+.angler-presence.is-offline {
+  color: #5a1030;
+  background: #ff8ab0;
+}
+.angler.is-you .angler-presence.is-online {
+  color: #0f3d2c;
+  background: #7eecc0;
+}
+.angler.is-you .angler-presence.is-idle {
+  color: #5a3a00;
+  background: #ffe08a;
+}
+.dock-swipe-hint {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 8;
+  pointer-events: none;
+}
+.dock-swipe-glyphs {
+  position: relative;
+  width: 144px;
+  height: 252px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.dock-swipe-glyph {
+  position: absolute;
+  left: 50%;
+  width: 96px;
+  height: 96px;
+  display: grid;
+  place-items: center;
+  font-size: 84px;
+  font-weight: 900;
+  color: #ffe08a;
+  text-shadow: 0 2px 0 #2a1a0c, 0 0 12px rgba(255, 232, 160, 0.4);
+  line-height: 1;
+  opacity: 0;
+  transform-origin: center center;
+  will-change: top, opacity;
+}
+.dock-swipe-hint.is-up .dock-swipe-glyph {
+  transform: translateX(-50%) rotate(-90deg);
+  animation: dock-glyph-rise 4.05s ease-in-out infinite;
+}
+.dock-swipe-hint.is-down .dock-swipe-glyph {
+  transform: translateX(-50%) rotate(90deg);
+  color: #ffe566;
+  animation: dock-glyph-sink 3.3s ease-in-out infinite;
+}
+.dock-swipe-hint.is-up .dock-swipe-glyph:nth-child(1) { animation-delay: 0s; }
+.dock-swipe-hint.is-up .dock-swipe-glyph:nth-child(2) { animation-delay: 1.35s; }
+.dock-swipe-hint.is-up .dock-swipe-glyph:nth-child(3) { animation-delay: 2.7s; }
+.dock-swipe-hint.is-down .dock-swipe-glyph:nth-child(1) { animation-delay: 0s; }
+.dock-swipe-hint.is-down .dock-swipe-glyph:nth-child(2) { animation-delay: 1.11s; }
+.dock-swipe-hint.is-down .dock-swipe-glyph:nth-child(3) { animation-delay: 2.22s; }
+@keyframes dock-glyph-rise {
+  0% { top: 92%; opacity: 0; transform: translateX(-50%) rotate(-90deg); }
+  14% { opacity: 1; transform: translateX(-50%) rotate(-90deg); }
+  86% { opacity: 1; transform: translateX(-50%) rotate(-90deg); }
+  100% { top: -8%; opacity: 0; transform: translateX(-50%) rotate(-90deg); }
+}
+@keyframes dock-glyph-sink {
+  0% { top: -8%; opacity: 0; transform: translateX(-50%) rotate(90deg); }
+  14% { opacity: 1; transform: translateX(-50%) rotate(90deg); }
+  86% { opacity: 1; transform: translateX(-50%) rotate(90deg); }
+  100% { top: 92%; opacity: 0; transform: translateX(-50%) rotate(90deg); }
+}
+.tank-canvas.is-scatter-feed {
+  cursor: crosshair;
+}
+.tank-canvas.is-scatter-feed canvas {
+  cursor: crosshair;
+}
+.tank-canvas.is-mate-spray {
+  cursor:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath fill='%235a9fd4' d='M8 3h3v8H8z'/%3E%3Cpath fill='%2388c8ee' d='M9 11h1v3H9z'/%3E%3Cpath fill='%23c8e8ff' d='M14 6c2 0 4 2 4 4.5S16 15 14 15s-4-2-4-4.5S12 6 14 6z'/%3E%3C/svg%3E")
+      6 22,
+    crosshair;
+}
+.tank-canvas.is-mate-spray canvas {
+  cursor:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath fill='%235a9fd4' d='M8 3h3v8H8z'/%3E%3Cpath fill='%2388c8ee' d='M9 11h1v3H9z'/%3E%3Cpath fill='%23c8e8ff' d='M14 6c2 0 4 2 4 4.5S16 15 14 15s-4-2-4-4.5S12 6 14 6z'/%3E%3C/svg%3E")
+      6 22,
+    crosshair;
+}
 .angler-exclaim {
   position: absolute;
-  top: -8px;
-  left: 54%;
+  top: 10px;
+  left: 50%;
   width: 30px;
   height: 34px;
   background: #fffdf6;
@@ -1296,8 +1512,10 @@ input {
   color: #24160c;
   font-size: 22px;
   font-weight: 900;
-  line-height: 34px;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
   z-index: 8;
   animation: exclaim-pop 0.38s cubic-bezier(0.18, 1.4, 0.28, 1) both;
   box-shadow: 3px 3px 0 rgba(36, 22, 12, 0.25);
@@ -1305,14 +1523,138 @@ input {
 .angler-exclaim::after {
   content: "";
   position: absolute;
-  left: 7px;
+  left: 50%;
+  transform: translateX(-50%);
   bottom: -10px;
   border: 6px solid transparent;
   border-top-color: #24160c;
 }
 @keyframes exclaim-pop {
-  0% { transform: translateY(10px) scale(0.4); opacity: 0; }
-  100% { transform: translateY(0) scale(1); opacity: 1; }
+  0% { transform: translateX(-50%) translateY(10px) scale(0.4); opacity: 0; }
+  100% { transform: translateX(-50%) translateY(0) scale(1); opacity: 1; }
+}
+.angler-sticker {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  min-width: 36px;
+  height: 36px;
+  padding: 0 8px;
+  background: #fffdf6;
+  border: 3px solid #24160c;
+  border-radius: 999px;
+  font-size: 20px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9;
+  animation: exclaim-pop 0.38s cubic-bezier(0.18, 1.4, 0.28, 1) both;
+  box-shadow: 3px 3px 0 rgba(36, 22, 12, 0.25);
+  pointer-events: none;
+}
+.angler-sticker::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: -10px;
+  border: 6px solid transparent;
+  border-top-color: #24160c;
+}
+.fishing-emoji-dock {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+.fishing-emoji-fab {
+  width: 50px;
+  height: 50px;
+  padding: 0;
+  border-radius: 50%;
+  border: 3px solid #24160c;
+  background: #fffdf6;
+  font-size: 26px;
+  line-height: 1;
+  letter-spacing: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 3px 3px 0 rgba(36, 22, 12, 0.28);
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+.fishing-emoji-fab .fab-emoji {
+  display: block;
+  line-height: 1;
+  transform: translateX(-1px);
+}
+.fishing-emoji-fab:active,
+.fishing-emoji-fab.open {
+  transform: scale(0.94);
+  box-shadow: 2px 2px 0 rgba(36, 22, 12, 0.28);
+  background: #ffe9b8;
+}
+.fishing-emoji-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: rgba(255, 253, 246, 0.97);
+  border: 3px solid #24160c;
+  border-radius: 16px;
+  box-shadow: 4px 4px 0 rgba(36, 22, 12, 0.22);
+}
+.fishing-emoji-item {
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid #24160c;
+  background: #fff;
+  font-size: 22px;
+  line-height: 1;
+  letter-spacing: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 2px 2px 0 rgba(36, 22, 12, 0.18);
+}
+.fishing-emoji-item .sticker-glyph {
+  display: block;
+  line-height: 1;
+  transform: translateX(-1px);
+}
+.sticker-dots-glyph {
+  display: inline-block;
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  color: #2a1a0c;
+  line-height: 1;
+  white-space: nowrap;
+}
+.angler-sticker .sticker-dots-glyph {
+  font-size: 14px;
+  letter-spacing: 0.08em;
+}
+.fishchat-emoji-btn .sticker-dots-glyph {
+  font-size: 14px;
+}
+.fishchat-bubble .sticker-dots-glyph {
+  font-size: 16px;
+}
+.fishing-emoji-item:active {
+  transform: scale(0.92);
+  box-shadow: 1px 1px 0 rgba(36, 22, 12, 0.18);
+  background: #fff3d6;
 }
 .angler-sprite {
   position: absolute;
@@ -1456,8 +1798,8 @@ input {
 }
 .angler.is-casting .angler-bobber { animation: bobber-cast var(--cast-ms) cubic-bezier(0.18, 0.7, 0.2, 1) forwards; }
 .angler.is-reeling .angler-bobber { animation: bobber-reel 0.45s ease-in forwards; }
-.angler.is-bite .angler-bobber { animation: bobber-dunk 0.28s ease-in infinite; }
-.angler.is-fighting .angler-bobber { animation: bobber-fight 0.22s linear infinite; }
+.angler.is-bite .angler-bobber { animation: bobber-dunk 0.37s ease-in infinite; }
+.angler.is-fighting .angler-bobber { animation: bobber-fight 0.33s linear infinite; }
 .angler.is-missed .angler-bobber { opacity: 0.25; animation: none; transform: translateY(16px); }
 @keyframes bobber-wait {
   0%, 100% { transform: translateY(0); }
@@ -1483,6 +1825,9 @@ input {
 @keyframes bobber-fight {
   0%, 100% { transform: translate(-4px, 2px); }
   50% { transform: translate(6px, 10px); }
+}
+.dock-world.is-bite .angler-bobber {
+  filter: drop-shadow(0 0 6px rgba(255, 90, 90, 0.55));
 }
 .angler-ripple {
   position: absolute;
@@ -1701,18 +2046,26 @@ input {
   transform: none;
   z-index: 7;
   pointer-events: none;
-  font-size: 14px;
-  font-weight: 700;
+  width: min(96%, 380px);
+  min-width: 260px;
+  font-size: 17px;
+  font-weight: 800;
+  color: #fff8e0;
   text-align: center;
-  text-shadow: 0 2px 0 #2a1a0c;
-  background: rgba(42, 26, 12, 0.82);
-  border: 2px solid var(--border);
-  border-radius: 12px;
-  padding: 8px 12px;
+  text-shadow: 0 2px 0 #2a1a0c, 0 0 14px rgba(255, 232, 160, 0.45);
+  background: linear-gradient(180deg, rgba(96, 62, 32, 0.94), rgba(58, 38, 18, 0.96));
+  border: 2.5px solid #ffe08a;
+  border-radius: 14px;
+  padding: 12px 22px;
   white-space: normal;
-  line-height: 1.35;
+  line-height: 1.4;
+  box-shadow: 0 4px 0 #2a1a0c, 0 0 20px rgba(255, 224, 138, 0.22);
 }
-.dock-hint.accent { color: var(--accent); }
+.dock-hint.accent {
+  color: #ffe566;
+  border-color: #ffb84d;
+  background: linear-gradient(180deg, rgba(120, 52, 28, 0.96), rgba(72, 32, 16, 0.98));
+}
 
 .dock-sheet {
   position: relative;
@@ -1744,6 +2097,9 @@ input {
   background: transparent;
   pointer-events: none;
   padding: 8px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 .dock-fight-hud {
   pointer-events: none;
@@ -1751,19 +2107,82 @@ input {
   border: 2px solid var(--border);
   border-radius: 10px;
   padding: 6px 10px;
+  flex: none;
 }
-.minigame.dock-minigame .progress-line {
+.dock-fight-body {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 8px;
+  min-height: 0;
+  margin-top: 6px;
+}
+.minigame.dock-minigame .progress-line--vertical {
   pointer-events: none;
-  margin: 6px 0 0;
+  flex: none;
+  width: 34px;
+  margin: 0;
+  height: auto;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  position: relative;
+  border-radius: 999px;
+}
+.minigame.dock-minigame .progress-line--vertical > div {
+  width: 100%;
+  min-height: 4px;
+  border-radius: 999px;
+}
+.minigame.dock-minigame .progress-line--vertical .progress-pct {
+  position: absolute;
+  left: 50%;
+  top: 8px;
+  transform: translateX(-50%);
+  font-size: 11px;
+  font-weight: 700;
+  color: #e8f4ff;
+  text-shadow: 0 1px 0 #2a1a0c;
+  line-height: 1;
+  pointer-events: none;
 }
 .minigame.dock-minigame .minigame-stage {
-  position: absolute;
-  right: 8px;
-  top: 76px;
-  width: 48px;
-  bottom: 120px;
+  position: relative;
+  left: auto;
+  right: auto;
+  top: auto;
+  bottom: auto;
+  transform: none;
+  flex: 1;
+  width: auto;
   min-height: 0;
   pointer-events: none;
+}
+.fight-countdown {
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 72px;
+  font-weight: 800;
+  color: #ffe08a;
+  text-shadow: 0 4px 0 #2a1a0c, 0 0 24px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+.fight-guide-fish-zone,
+.fight-guide-player-zone {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  border-radius: 6px;
+  z-index: 1;
 }
 .minigame.dock-minigame .thumb-btn {
   pointer-events: auto;
@@ -1823,9 +2242,11 @@ input {
 }
 .notes-fab {
   position: absolute;
-  left: 50%;
+  left: 0;
+  right: 0;
   bottom: 22px;
-  transform: translateX(-50%);
+  margin-left: auto;
+  margin-right: auto;
   z-index: 4;
   width: 58px;
   height: 58px;

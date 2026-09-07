@@ -39,9 +39,18 @@ export default function VisitAquariumScene() {
   if (!npc || !tank) {
     return (
       <div className="hub">
-        <div className="hub-top">
-          <button className="back-btn" data-guide="back-aquarium" onClick={leaveVisit}>圣殿</button>
-          <span className="chip">钓友不在</span>
+        <div className="hub-mid">
+          <div className="hub-chrome">
+            <div className="hub-top-row">
+              <div className="hub-top-row-main">
+                <button className="back-btn" data-guide="back-aquarium" type="button" onClick={leaveVisit}>
+                  <BackChevron />
+                  <span>圣殿</span>
+                </button>
+                <span className="chip">钓友不在</span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -54,53 +63,72 @@ export default function VisitAquariumScene() {
 
   return (
     <div className="hub">
-      <div className="hub-top">
-        <button className="back-btn" data-guide="back-aquarium" onClick={leaveVisit} aria-label="返回">
-          <BackChevron />
-          <span>返回</span>
-        </button>
-        <NavArrow dir="prev" onClick={() => { selectTankFish(null); setTankIdx((i) => Math.max(0, i - 1)); }} disabled={tanks.length <= 1} />
-        <TankPlaque
-          name={`${npc.name} · ${tank.name}`}
-          quality={tank.quality}
-          used={used}
-          cap={cap}
-        />
-        <NavArrow dir="next" onClick={() => { selectTankFish(null); setTankIdx((i) => Math.min(tanks.length - 1, i + 1)); }} disabled={tanks.length <= 1} />
-      </div>
-
       <div className="hub-mid">
-        <TankCanvas fish={fish} tankId={tank.id} eggs={[]} allowCleanDead={false} />
+        <TankCanvas fish={fish} tankId={tank.id} eggs={[]} allowCleanDead={false} tankQuality={tank.quality} />
         {tank.decor !== "none" && <div className={`tank-decor ${tank.decor}`} />}
-        {selected && selectedDef && !rentOpen && (
-          <div className="hub-bar2">
-            <div className="hub-bar2-actions cols-2">
-              <button
-                className="primary"
-                onClick={() =>
-                  askConfirm({
-                    title: "确认求购",
-                    message: `花 ${buyPrice} 金求购「${selectedDef.name}」？鱼会进你的鱼筐。`,
-                    confirmLabel: "求购",
-                    onConfirm: () => {
-                      if (buyLeaderFish(selected.uid)) closeFish();
-                    },
-                  })
-                }
-              >
-                <IcoList />求购 {buyPrice}金
-              </button>
-              <button
-                onClick={() => {
-                  setRentDays(1);
-                  setRentOpen(true);
-                }}
-              >
-                <IcoPair />租借 {rentPerDay}金/天
-              </button>
+        <div className="hub-chrome">
+          <div className="hub-top-row">
+            <div className="hub-top-row-main">
+              <div className="hub-top hub-top-visit">
+                <button className="back-btn" data-guide="back-aquarium" type="button" onClick={leaveVisit} aria-label="返回">
+                  <BackChevron />
+                  <span>返回</span>
+                </button>
+                <NavArrow
+                  dir="prev"
+                  onClick={() => {
+                    selectTankFish(null);
+                    setTankIdx((i) => Math.max(0, i - 1));
+                  }}
+                  disabled={tanks.length <= 1}
+                />
+                <TankPlaque
+                  name={`${npc.name} · ${tank.name}`}
+                  quality={tank.quality}
+                  used={used}
+                  cap={cap}
+                />
+                <NavArrow
+                  dir="next"
+                  onClick={() => {
+                    selectTankFish(null);
+                    setTankIdx((i) => Math.min(tanks.length - 1, i + 1));
+                  }}
+                  disabled={tanks.length <= 1}
+                />
+              </div>
             </div>
           </div>
-        )}
+          {selected && selectedDef && !rentOpen && (
+            <div className="hub-bar2">
+              <div className="hub-bar2-actions cols-2">
+                <button
+                  className="primary"
+                  onClick={() =>
+                    askConfirm({
+                      title: "确认求购",
+                      message: `花 ${buyPrice} 金求购「${selectedDef.name}」？鱼会进你的鱼筐。`,
+                      confirmLabel: "求购",
+                      onConfirm: () => {
+                        if (buyLeaderFish(selected.uid)) closeFish();
+                      },
+                    })
+                  }
+                >
+                  <IcoList />求购 {buyPrice}金
+                </button>
+                <button
+                  onClick={() => {
+                    setRentDays(1);
+                    setRentOpen(true);
+                  }}
+                >
+                  <IcoPair />租借 {rentPerDay}金/天
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {rentOpen && selected && selectedDef && (

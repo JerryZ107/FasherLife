@@ -2,7 +2,7 @@ import { useRef, useState, type PointerEvent } from "react";
 import { useGame } from "../store/gameStore";
 import { FISHERY_BY_ID } from "../data/fisheryDefs";
 import SneakCanvas, { type SneakPhase } from "./SneakCanvas";
-import { PageHead } from "../ui/chrome";
+import { ModalCloseX, PageHead } from "../ui/chrome";
 
 export default function SneakScene() {
   const save = useGame((s) => s.save);
@@ -88,8 +88,9 @@ export default function SneakScene() {
         )}
       </div>
       {phase === "caught" && (
-        <div className="modal-backdrop">
-          <div className="modal">
+        <div className="modal-backdrop" onClick={() => setScene("fishing_map")}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <ModalCloseX onClose={() => setScene("fishing_map")} />
             <div className="modal-title">被抓住了</div>
             <p className="dim">交罚款、补票或办月卡，选一个。</p>
             <p>钱包：{save.gold} 金</p>
@@ -106,13 +107,16 @@ export default function SneakScene() {
         </div>
       )}
       {phase === "win" && (
-        <div className="modal-backdrop">
-          <div className="modal">
-            <div className="modal-title">溜进去了</div>
-            <p className="dim">没被发现，直接进钓鱼区。</p>
-            <button className="primary" onClick={() => {
-              if (fisheryId && enterFishery(fisheryId, "sneak")) setScene("fishing");
-            }}>开始钓鱼</button>
+        <div className="modal-backdrop" onClick={() => { if (fisheryId) enterFishery(fisheryId, "sneak"); setScene("fishing"); }}>
+          <div className="modal sneak-win-modal" onClick={(e) => e.stopPropagation()}>
+            <ModalCloseX onClose={() => { if (fisheryId) enterFishery(fisheryId, "sneak"); setScene("fishing"); }} />
+            <div className="modal-scroll">
+              <div className="modal-title">溜进去了</div>
+              <p className="dim">没被发现，直接进钓鱼区。</p>
+              <button className="primary" onClick={() => {
+                if (fisheryId && enterFishery(fisheryId, "sneak")) setScene("fishing");
+              }}>开始钓鱼</button>
+            </div>
           </div>
         </div>
       )}

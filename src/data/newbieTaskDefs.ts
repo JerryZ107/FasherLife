@@ -1,4 +1,4 @@
-/** 新手任务（成就式，与界面引导线分离）。每项奖励 20 金。 */
+/** 新手任务（成就式，与界面引导线分离）。每项奖励适中经验。 */
 
 export type NewbieTaskId =
   | "nt_catch_common"
@@ -18,7 +18,7 @@ export interface NewbieTaskDef {
   kind: NewbieTaskKind;
   /** count 型目标；flag 型为 1。 */
   target: number;
-  rewardGold: number;
+  rewardXp: number;
   /** 进度字段名（对应 NewbieTaskState）。 */
   progressKey: keyof NewbieTaskProgressFields;
 }
@@ -34,7 +34,8 @@ export type NewbieTaskProgressFields = {
   cook: number;
 };
 
-export const NEWBIE_TASK_REWARD = 20;
+/** 每项奖励适中经验（引导线已单独给级；成就任务作中期补充）。 */
+export const NEWBIE_TASK_REWARD = 45;
 
 export const NEWBIE_TASK_DEFS: NewbieTaskDef[] = [
   {
@@ -43,7 +44,7 @@ export const NEWBIE_TASK_DEFS: NewbieTaskDef[] = [
     hint: "任意渔场钓到普通品质即可。",
     kind: "count",
     target: 5,
-    rewardGold: NEWBIE_TASK_REWARD,
+    rewardXp: NEWBIE_TASK_REWARD,
     progressKey: "catchCommon",
   },
   {
@@ -52,7 +53,7 @@ export const NEWBIE_TASK_DEFS: NewbieTaskDef[] = [
     hint: "去商城·装备买下一根竿（竹节竿不算）。",
     kind: "flag",
     target: 1,
-    rewardGold: NEWBIE_TASK_REWARD,
+    rewardXp: NEWBIE_TASK_REWARD,
     progressKey: "buyRod",
   },
   {
@@ -61,7 +62,7 @@ export const NEWBIE_TASK_DEFS: NewbieTaskDef[] = [
     hint: "去背包页给鱼竿换上轮、线、钩或漂。",
     kind: "flag",
     target: 1,
-    rewardGold: NEWBIE_TASK_REWARD,
+    rewardXp: NEWBIE_TASK_REWARD,
     progressKey: "swapPart",
   },
   {
@@ -70,7 +71,7 @@ export const NEWBIE_TASK_DEFS: NewbieTaskDef[] = [
     hint: "把起始那口缸养满（容量 6 条）。",
     kind: "flag",
     target: 1,
-    rewardGold: NEWBIE_TASK_REWARD,
+    rewardXp: NEWBIE_TASK_REWARD,
     progressKey: "fillTank",
   },
   {
@@ -79,7 +80,7 @@ export const NEWBIE_TASK_DEFS: NewbieTaskDef[] = [
     hint: "去商城·鱼缸买下一口缸。",
     kind: "flag",
     target: 1,
-    rewardGold: NEWBIE_TASK_REWARD,
+    rewardXp: NEWBIE_TASK_REWARD,
     progressKey: "buyTank",
   },
   {
@@ -88,7 +89,7 @@ export const NEWBIE_TASK_DEFS: NewbieTaskDef[] = [
     hint: "在水族馆缸位管理里扩建，腾出新空位。",
     kind: "flag",
     target: 1,
-    rewardGold: NEWBIE_TASK_REWARD,
+    rewardXp: NEWBIE_TASK_REWARD,
     progressKey: "expand",
   },
   {
@@ -97,7 +98,7 @@ export const NEWBIE_TASK_DEFS: NewbieTaskDef[] = [
     hint: "用筐里的鱼 + 盐做菜。",
     kind: "count",
     target: 3,
-    rewardGold: NEWBIE_TASK_REWARD,
+    rewardXp: NEWBIE_TASK_REWARD,
     progressKey: "cook",
   },
 ];

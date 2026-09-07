@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
+import { useGame } from "../store/gameStore";
 import { useUi } from "../store/uiStore";
 import { ConfirmSheet, ModalSheet } from "./chrome";
 import MonthlyGoldModal from "./MonthlyGoldModal";
 import GuideOverlay from "./GuideOverlay";
 import WelcomeModal from "./WelcomeModal";
 import DebugModal from "./DebugModal";
+import FishChatPhone from "./FishChatPhone";
 
 const FAB_KEY = "fash-debug-fab-pos";
 const FAB_SIZE = 36;
@@ -132,6 +134,12 @@ export default function HudOverlays() {
   const confirm = useUi((s) => s.confirm);
   const monthlyGoldOpen = useUi((s) => s.monthlyGoldOpen);
   const debugOpen = useUi((s) => s.debugOpen);
+  const fishChatOpen = useUi((s) => s.fishChatOpen);
+  const closeFishChatGuide = useGame((s) => s.closeFishChatGuide);
+  const guideTutorialCompleteOpen = useUi((s) => s.guideTutorialCompleteOpen);
+  const closeGuideTutorialComplete = useUi((s) => s.closeGuideTutorialComplete);
+  const mateLayHealthHintOpen = useUi((s) => s.mateLayHealthHintOpen);
+  const ackMateLayHealthHint = useGame((s) => s.ackMateLayHealthHint);
   const clearComingSoon = useUi((s) => s.clearComingSoon);
   const clearConfirm = useUi((s) => s.clearConfirm);
 
@@ -157,7 +165,27 @@ export default function HudOverlays() {
         />
       )}
       {monthlyGoldOpen && <MonthlyGoldModal />}
+      {fishChatOpen && <FishChatPhone onClose={closeFishChatGuide} />}
       <GuideOverlay />
+      {guideTutorialCompleteOpen && (
+        <ModalSheet title="新手教程完成" onClose={closeGuideTutorialComplete}>
+          <p>恭喜完成新手教程！</p>
+          <p className="dim">可于「任务」中重温。</p>
+          <button type="button" className="primary" onClick={closeGuideTutorialComplete}>
+            知道了
+          </button>
+        </ModalSheet>
+      )}
+      {mateLayHealthHintOpen && (
+        <ModalSheet title="产卵与健康" onClose={ackMateLayHealthHint} className="confirm-layer">
+          <p>
+            两条鱼靠近后会产卵。产卵后健康会下降（母鱼较多，公鱼也会消耗），需要喂食或等待才能慢慢恢复。
+          </p>
+          <button type="button" className="primary" onClick={ackMateLayHealthHint}>
+            知道了
+          </button>
+        </ModalSheet>
+      )}
       {debugOpen ? <DebugModal /> : <DebugFab />}
       {toast && <div className="toast">{toast}</div>}
     </>

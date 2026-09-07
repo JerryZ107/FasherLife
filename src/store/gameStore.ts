@@ -15,6 +15,7 @@ import {
 } from "../save/saveSchema";
 import { FISH_BY_ID } from "../data/fishDefs";
 import { CONSUMABLE_BY_ID, foodIdFromBait } from "../data/consumableDefs";
+import { BAIT_PACK_SIZE } from "../game/constants";
 import { kitPartIds, PART_BY_ID, ROD_BY_ID, STOOL_BY_ID, BASKET_BY_ID } from "../data/equipmentDefs";
 import { OUTFIT_BY_ID } from "../data/outfitDefs";
 import { BOOK_BY_ID, bookLuck } from "../data/bookDefs";
@@ -30,6 +31,7 @@ import {
   IDLE_MS_PER_CAST,
   LUCK_CAP,
   MONTHLY_CARD_DAILY_GOLD,
+  MONTHLY_CARD_DAILY_PEARL,
   MONTHLY_CARD_DAYS,
   NEWBIE_PACK_DAYS,
   PEARL_TO_GOLD,
@@ -41,37 +43,49 @@ import {
   healthDropForDay,
   hostingDailyFee,
   pickFoodForQuality,
+  basketSellPrice,
   tankSellPrice,
   type FeedResult,
 } from "../game/economy";
 import {
+  ADULT_HEALTH_MAX,
+  addFishFeedSatiety,
+  applyDailyGrowthWhenFull,
+  applyFeedGrowth,
+  canFeedFishToday,
+  effectiveHealthPercent,
+  fishFedToday,
+  newbornFishStats,
+  syncAdultBodyBulk,
+} from "../game/growth";
+import {
   addAffection,
   affectionGainForFeed,
-  canNameFish,
   fishTitle,
   normalizeFishName,
   tryPetFish,
 } from "../game/affection";
-import { questIndex } from "../game/guide";
+import { questIndex, isFishchatGuideActive } from "../game/guide";
+import { unlockFishEncyclopedia } from "../game/encyclopedia";
 import { genUid, pickBiteOutcome, applyJunkToSave, addToBasket, replaceBasketFish, tryAddToBasket, basketFits, basketRejectReason, type BasketAddResult } from "../game/fishingLogic";
 import { copyMails, ensureInbox, grantMailReward, mailExpired } from "../game/mail";
 import { extendMonthlyCard, monthlyDaysLeft, MONTHLY_GIFT_REEL, settleMonthlyGold } from "../game/monthlyCard";
 import { MAIL_BY_ID, mailHasReward } from "../data/mailDefs";
 import { sexFromUid } from "../game/sex";
 import {
-  bindPair,
   breakPair,
-  hatchDaysForParents,
   hatchGoldForParents,
   HATCH_PEARL,
   pickOffspringDefId,
-  resolveScentLays,
   rollOffspringTraits,
-  rollPairAccept,
-  scentBuyTimeForFish,
-  scentBuyTimeForTank,
+  scheduleEggHatch,
   tickPairsAndEggs,
 } from "../game/pairing";
+import {
+  layMatingEggs,
+  mateRefuseReason,
+  stockFromLots,
+} from "../game/mating";
 import { rollTraits } from "../game/traits";
 import {
   accountExists,
@@ -102,6 +116,8 @@ import {
   nextTankName,
   placedTanks,
   tankHasRoom,
+  basketFishCountsTowardCapacity,
+  capacityNeedForFishUids,
 } from "../game/tanks";
 import { applySlotAssign, checkSlotAssignOverflow } from "../game/slotAssign";
 import { LEADER_BY_ID, leaderBuyPrice, leaderMatePrice, leaderRentPricePerDay, visibleLeaderFish } from "../data/leaderboard";
@@ -116,6 +132,7 @@ import {
   ENERGY_DRINK_STAMINA,
   formatWait,
   grantCatchXp,
+  grantQuestXp,
   idleStaminaCostForDef,
   PLAYER_LEVEL_MAX,
   resetSatietyIfNewDay,
@@ -125,6 +142,8 @@ import {
   YUANQI_RESTORE,
 } from "../game/stamina";
 import { beijingCalendarDaysPassed } from "../game/time";
+import { MAX_PROFILE_SHOWCASE_FISH } from "../game/profileFish";
+import { findFeedPost, playerFeedUid, postLikes, sharedCatchUids, appendDailyCatch, hasSelfFeedPostToday, type FishFeedPost } from "../data/fishFeedDefs";
 
 const bootSave = createNewSave();
 const hasSessionCreds = Boolean(getSessionAccount() && getSessionHash());
@@ -142,6 +161,13 @@ interface GameStore {
   selectEgg: (uid: string | null) => void;
   selectFishery: (id: string | null) => void;
   startGame: (playerName?: string) => void;
+  setPlayerSignature: (signature: string) => boolean;
+  setProfileShowcaseOutfit: (outfitId: string) => boolean;
+  toggleProfileShowcaseFish: (uid: string) => boolean;
+  clearProfileShowcaseFish: () => void;
+  publishFishFeedPost: (basketUids: string[]) => boolean;
+  deleteFishFeedPost: (postId: string) => boolean;
+  toggleFishFeedLike: (postId: string) => void;
   login: (account: string, password: string, remember?: boolean) => Promise<string | null>;
   register: (account: string, password: string, remember?: boolean) => Promise<string | null>;
   logout: () => void;
@@ -150,7 +176,6 @@ interface GameStore {
 
   tick: (now: number) => void;
   settleDays: (now: number) => void;
-  resolveScent: (now: number) => void;
   simulateIdle: (now: number, force?: boolean) => void;
   idleCatchOnce: () =>
     | { kind: "fish"; fish: FishDef; bag: BasketAddResult }
@@ -161,9 +186,13 @@ interface GameStore {
 
   putToTank: (basketUid: string) => void;
   putManyToTank: (basketUids: string[]) => void;
-  feed: (uid: string, foodId?: string, opts?: { quiet?: boolean }) => FeedResult;
+  feed: (uid: string, foodId?: string, opts?: { quiet?: boolean; prepaid?: boolean }) => FeedResult;
   feedMany: (uids: string[], foodIds: string[]) => void;
   renameFish: (uid: string, name: string) => boolean;
+  /** 散点喂食：点击缸内时扣 1 份当前装备鱼粮，返回 foodId。 */
+  spawnScatterPellet: () => string | null;
+  /** 散点喂食：鱼吃到已抛出的鱼粮（不再扣库存）。 */
+  eatScatterPellet: (uid: string, foodId: string) => FeedResult;
   petFish: (uid: string) => void;
   release: (uid: string) => void;
   releaseMany: (uids: string[]) => void;
@@ -181,14 +210,17 @@ interface GameStore {
   finishExpandIfReady: () => boolean;
   tryAssignTankSlot: (slotIndex: number, tankId: string | null) => boolean;
   confirmSlotOverflow: (basketUids: string[]) => boolean;
-  unpair: (pairId: string) => void;
   buyAttractant: (id: string) => boolean;
-  applyAttractantToFish: (uid: string, id: string) => boolean;
-  applyAttractantToTank: (id: string) => boolean;
+  sprayMatingScent: (fishAUid: string, fishBUid: string, lotUid: string) => boolean;
+  completeMating: (fishAUid: string, fishBUid: string, spawn?: { x: number }) => { laid: number; eggUids: string[] };
+  commitEggPositions: (positions: Array<{ uid: string; x: number; y: number }>) => void;
 
-  hatchEgg: (eggUid: string) => boolean;
   accelerateEgg: (eggUid: string, mode: "pearl" | "ad") => boolean;
+  flushEggHatch: () => void;
   listEgg: (eggUid: string, price: number) => void;
+  renameEgg: (eggUid: string, name: string) => boolean;
+  moveEggToTank: (eggUid: string, destTankId: string) => boolean;
+  sellEggFromTank: (eggUid: string) => void;
 
   hasFisheryCard: (fisheryId: string) => boolean;
   buyFisheryCard: (fisheryId: string) => boolean;
@@ -213,12 +245,13 @@ interface GameStore {
 
   sellToMarket: (basketUid: string) => void;
   sellFromTank: (tankUid: string) => void;
+  sellManyFromTank: (uids: string[]) => void;
   sellManyToMarket: (uids: string[]) => void;
   listFish: (basketUid: string, price: number) => void;
   listFromTank: (tankUid: string, price: number) => void;
   unlistListing: (listingUid: string) => void;
   listManyFromTank: (uids: string[], priceOf?: (defId: string) => number) => void;
-  listMany: (uids: string[], priceOf: (defId: string) => number) => void;
+  listMany: (uids: string[], priceOf?: (defId: string) => number) => void;
   buyListing: (listingUid: string) => boolean;
 
   buyBaitPack: (baitId: string, packs: number) => boolean;
@@ -273,6 +306,13 @@ interface GameStore {
   notifyQuest: (trigger: QuestTrigger) => void;
   skipGuide: () => void;
   resumeGuide: (stepId?: string) => void;
+  ackFeatureIntro: (feature: "mate" | "fishchat" | "encyc") => void;
+  ackMateLayHealthHint: () => void;
+  markGuideStaminaHinted: () => void;
+  markGuideFishchatShowcaseDone: () => void;
+  advanceGuideFightIntro: () => void;
+  completeGuideFightIntro: () => void;
+  closeFishChatGuide: () => void;
   /** 回答新手引导询问：接受则开启引导，拒绝则关掉界面引导。 */
   answerGuidePrompt: (accept: boolean) => void;
 }
@@ -349,17 +389,34 @@ function makeTankFish(
   save: SaveData,
   defId: string,
   tankId: string,
-  extra?: { sex?: Sex; personality?: Personality; loveView?: LoveView; health?: number; lastFedDay?: number },
+  extra?: {
+    sex?: Sex;
+    personality?: Personality;
+    loveView?: LoveView;
+    health?: number;
+    healthMax?: number;
+    lastFedDay?: number;
+    juvenile?: boolean;
+  },
 ): SaveData["tank"][number] {
   const uid = genUid("t");
   const traits = extra?.personality && extra.loveView
     ? { personality: extra.personality, loveView: extra.loveView }
     : rollTraits();
-  const health = extra?.health != null ? Math.max(1, Math.min(100, extra.health)) : 100;
-  return {
+  const newborn = extra?.juvenile ? newbornFishStats() : null;
+  const healthMax = extra?.healthMax != null
+    ? Math.min(ADULT_HEALTH_MAX, Math.max(1, extra.healthMax))
+    : newborn?.healthMax ?? ADULT_HEALTH_MAX;
+  const health = extra?.health != null
+    ? Math.max(1, Math.min(healthMax, extra.health))
+    : healthMax;
+  const mateRestUntilDay = newborn?.mateRestUntilDay ?? 0;
+  const fish: SaveData["tank"][number] = {
     uid,
     defId,
     health,
+    healthMax,
+    mateRestUntilDay,
     dead: false,
     lastFedDay: extra?.lastFedDay ?? save.gameDay,
     lastSettledAt: Date.now(),
@@ -378,6 +435,35 @@ function makeTankFish(
     petDay: -1,
     petCount: 0,
   };
+  syncAdultBodyBulk(fish);
+  unlockFishEncyclopedia(save, defId);
+  return fish;
+}
+
+function tryHatchOneEgg(save: SaveData, eggUid: string): boolean {
+  const egg = save.eggs.find((e) => e.uid === eggUid);
+  if (!egg || !egg.started || save.gameDay < egg.readyDay) return false;
+  const defId = egg.defId ?? pickOffspringDefId(egg.parentA, egg.parentB);
+  if (!FISH_BY_ID[defId]) return false;
+  const born = rollOffspringTraits();
+  const child = makeTankFish(save, defId, egg.tankId, { ...born, juvenile: true });
+  save.tank = [...save.tank, child];
+  save.eggs = save.eggs.filter((e) => e.uid !== eggUid);
+  unlockFishEncyclopedia(save, defId);
+  checkFillTank(save);
+  return true;
+}
+
+function hatchReadyEggs(save: SaveData): number {
+  const ids = save.eggs
+    .filter((e) => e.started && save.gameDay >= e.readyDay)
+    .map((e) => e.uid);
+  let n = 0;
+  for (const uid of ids) {
+    if (tryHatchOneEgg(save, uid)) n += 1;
+  }
+  if (n > 0) toast(`孵出 ${n} 条小鱼`);
+  return n;
 }
 
 function effectiveLuck(save: SaveData): number {
@@ -456,13 +542,12 @@ function checkFillTank(save: SaveData) {
 }
 
 function noteCatch(save: SaveData, fishDef: FishDef) {
-  if (!save.caughtFishIds.includes(fishDef.id)) {
-    save.caughtFishIds = [...save.caughtFishIds, fishDef.id];
-  }
+  unlockFishEncyclopedia(save, fishDef.id);
   bumpTimedCatch(save, fishDef.id);
   if (fishDef.quality === "common") bumpNewbieCount(save, "catchCommon");
+  appendDailyCatch(save, fishDef.id);
   if (save.questStep === "q_go_fish") applyQuest(save, "open_map");
-  applyQuest(save, "catch");
+  if (save.questStep === "q_catch") applyQuest(save, "catch");
   const lv = grantCatchXp(save, fishDef.quality);
   if (lv.to > lv.from) {
     const msg = lv.to >= PLAYER_LEVEL_MAX
@@ -510,7 +595,7 @@ function runIdleAttempt(save: SaveData, announce: boolean): IdleCatchOutcome {
     return { ok: true, kind: "junk", junk: bite.junk, story: announce ? story : null };
   }
   const fish = bite.fish;
-  const cost = idleStaminaCostForDef(fish.id);
+  const cost = idleStaminaCostForDef(fish.id, save.equipped.stool);
   if (save.stamina < cost) return { ok: false, reason: "stamina" };
   save.baitStock[baitId] = bait - 1;
   save.stamina -= cost;
@@ -532,7 +617,7 @@ function toastIdleStop(reason: "bait" | "stamina" | "gone") {
 function applyQuest(save: SaveData, trigger: QuestTrigger): boolean {
   const q = QUEST_BY_ID[save.questStep];
   if (!q || q.trigger !== trigger) return false;
-  save.gold += q.rewardGold;
+  const lv = grantQuestXp(save, q.rewardXp);
   if (q.rewardBait) {
     save.baitStock = {
       ...save.baitStock,
@@ -547,11 +632,19 @@ function applyQuest(save: SaveData, trigger: QuestTrigger): boolean {
   }
   if (q.rewardSalt) save.saltStock = (save.saltStock ?? 0) + q.rewardSalt;
   save.questStep = q.next ?? "q_done";
+  if (q.id === "q_read_encyc") save.guideEncycDone = true;
   const review = useUi.getState().guideReviewStep;
   if (review && questIndex(review) < questIndex(save.questStep)) {
     useUi.getState().setGuideReviewStep(null);
   }
-  if (q.id === "q_sell") useUi.getState().resetGuideHints();
+  if (q.id === "q_sell") {
+    useUi.setState({
+      guideSellPrompted: false,
+      mapPicked: null,
+      meetFisheryId: null,
+      guideTripPhase: 0,
+    });
+  }
   if (trigger === "feed" || trigger === "tank") clearGuideTrip(save);
   // 离开钓鱼入缸段后清掉回程相位，防止后续任务被「再去钓鱼/存缸」劫持
   if (
@@ -564,8 +657,14 @@ function applyQuest(save: SaveData, trigger: QuestTrigger): boolean {
     clearGuideTrip(save);
   }
   const bits: string[] = [`任务完成：${q.title}`];
-  if (q.rewardGold) bits.push(`+${q.rewardGold}金`);
+  if (q.rewardXp) bits.push(`+${q.rewardXp}经验`);
   if (q.rewardSalt) bits.push(`+${q.rewardSalt}盐`);
+  if (lv.to > lv.from) {
+    const msg = lv.to >= PLAYER_LEVEL_MAX
+      ? `升到 ${lv.to} 级，能量已回满`
+      : `升到 ${lv.to} 级`;
+    toast(msg);
+  }
   toast(bits.join(" "));
   return true;
 }
@@ -637,7 +736,7 @@ function tryAutoFeedDay(save: SaveData, dayIndex: number): { unfed: number; boug
   let unfed = 0;
   let bought = 0;
   for (const f of living) {
-    if (f.lastFedDay === dayIndex) continue;
+    if (!canFeedFishToday(f, dayIndex)) continue;
     const quality = fishQuality(f.defId);
     let foodId = pickFoodForQuality(save.foodStock, quality, save.equipped.food);
     if (!foodId) {
@@ -654,10 +753,10 @@ function tryAutoFeedDay(save: SaveData, dayIndex: number): { unfed: number; boug
       continue;
     }
     save.foodStock[foodId] -= 1;
-    f.lastFedDay = dayIndex;
+    addFishFeedSatiety(f, dayIndex);
     addAffection(f, affectionGainForFeed(f.defId, foodId));
   }
-  if (living.some((f) => f.lastFedDay === dayIndex)) markDaily(save, "fed");
+  if (living.some((f) => fishFedToday(f, dayIndex))) markDaily(save, "fed");
   return { unfed, bought };
 }
 
@@ -678,34 +777,26 @@ export const useGame = create<GameStore>((set, get) => ({
       visitNpcId: scene === "visit_aquarium" ? prev.visitNpcId : null,
       guideTripPhase: phase,
     };
-    // 回馆且筐空：回程结束，清零。新流程不再因此进入相位 5 喂食。
-    if (phase === 4 && save.basket.length === 0) {
+    // 回程且筐空：行程结束，清零（相位 3=钓点→地图 也会被 fishing→map 带上）
+    if ((phase === 3 || phase === 4) && save.basket.length === 0) {
       save.guideTripPhase = 0;
     }
-    // 开局引导买鱼粮：离开商城回馆即视为备货完成
-    if (
-      prev.scene === "shop" &&
-      scene === "aquarium" &&
-      save.questStep === "q_feed" &&
-      !save.guideShopDone
-    ) {
-      save.guideShopDone = true;
-    }
-    // 钓鱼成功后挂机引导：离开钓点回地图即视为挂机引导完成
+    // 挂机引导：看完体力提示并离开钓点后才算完成，中途退出回来仍从挂机步骤继续
     if (
       prev.scene === "fishing" &&
       scene === "fishing_map" &&
       save.questStep === "q_tank" &&
-      !save.guideIdleDone
+      !save.guideIdleDone &&
+      useUi.getState().guideIdleStaminaHinted
     ) {
       save.guideIdleDone = true;
-      useUi.getState().markGuideIdleStaminaHinted(); // 避免回钓点重复能量提示
     }
-    // 吃菜后体力提示：参观圣殿前首次切场景即视为已展示
+    // 体力提示：进入圣殿排行后再标记已看过，避免切场景就跳过
     if (
       !save.guideStaminaHinted &&
-      (save.questStep === "q_visit_temple" || save.questStep === "q_done") &&
-      scene !== prev.scene
+      save.questStep === "q_visit_temple" &&
+      scene === "leaderboard" &&
+      prev.scene !== "leaderboard"
     ) {
       save.guideStaminaHinted = true;
     }
@@ -734,6 +825,150 @@ export const useGame = create<GameStore>((set, get) => ({
     };
     persist(save);
     set({ save, selectedTankUid: null, selectedEggUid: null });
+  },
+
+  setPlayerSignature: (raw) => {
+    const signature = raw.trim().slice(0, 48);
+    if (!signature) {
+      toast("签名不能为空");
+      return false;
+    }
+    const save = { ...get().save, playerSignature: signature };
+    persist(save);
+    set({ save });
+    return true;
+  },
+
+  setProfileShowcaseOutfit: (outfitId) => {
+    const save = { ...get().save };
+    if (!save.ownedOutfits.includes(outfitId)) {
+      toast("还没有这套服装");
+      return false;
+    }
+    if (save.profileShowcaseOutfitId === outfitId) return true;
+    save.profileShowcaseOutfitId = outfitId;
+    persist(save);
+    set({ save });
+    return true;
+  },
+
+  toggleProfileShowcaseFish: (uid) => {
+    const save = { ...get().save };
+    const cur = save.profileShowcaseFishUids;
+    const idx = cur.indexOf(uid);
+    if (idx >= 0) {
+      save.profileShowcaseFishUids = cur.filter((x) => x !== uid);
+      persist(save);
+      set({ save });
+      return true;
+    }
+    const fish = save.tank.find((f) => f.uid === uid && !f.dead);
+    if (!fish) {
+      toast("只能展示缸里的活鱼");
+      return false;
+    }
+    if (cur.length >= MAX_PROFILE_SHOWCASE_FISH) {
+      toast(`最多展示 ${MAX_PROFILE_SHOWCASE_FISH} 条鱼`);
+      return false;
+    }
+    save.profileShowcaseFishUids = [...cur, uid];
+    persist(save);
+    set({ save });
+    return true;
+  },
+
+  clearProfileShowcaseFish: () => {
+    const save = { ...get().save };
+    if (save.profileShowcaseFishUids.length === 0) return;
+    save.profileShowcaseFishUids = [];
+    persist(save);
+    set({ save });
+  },
+
+  publishFishFeedPost: (catchUids) => {
+    const ids = [...new Set(catchUids.filter(Boolean))];
+    if (ids.length === 0) {
+      toast("请至少选择一条鱼");
+      return false;
+    }
+    const save = { ...get().save };
+    const shared = sharedCatchUids(save);
+    if (ids.some((uid) => shared.has(uid))) {
+      toast("这些渔获已经发过动态了");
+      return false;
+    }
+    const log = save.dailyCatchLog ?? [];
+    const entries = ids
+      .map((uid) => log.find((c) => c.uid === uid))
+      .filter((c): c is NonNullable<typeof c> => Boolean(c));
+    if (entries.length !== ids.length) {
+      toast("只能分享今天钓到的渔获记录");
+      return false;
+    }
+    if (entries.some((c) => c.gameDay !== save.gameDay)) {
+      toast("只能分享今天钓到的鱼");
+      return false;
+    }
+    const account = get().account;
+    const post: FishFeedPost = {
+      id: genUid("feed"),
+      authorUid: playerFeedUid(account),
+      gameDay: save.gameDay,
+      createdAt: Date.now(),
+      fish: entries.map((c) => ({
+        defId: c.defId,
+        customName: c.customName,
+        catchUid: c.uid,
+      })),
+      likeUids: [],
+    };
+    save.fishFeedPosts = [post, ...save.fishFeedPosts];
+    const reviewStep = useUi.getState().guideReviewStep;
+    const inGuideFishchat = isFishchatGuideActive(save, reviewStep);
+    if (inGuideFishchat) {
+      save.guideFishchatPostDone = true;
+    } else {
+      applyQuest(save, "fishchat_post");
+    }
+    persist(save);
+    set({ save });
+    toast("已发布到动态");
+    return true;
+  },
+
+  deleteFishFeedPost: (postId) => {
+    const prev = get().save;
+    const save = { ...prev, fishFeedPosts: [...prev.fishFeedPosts] };
+    const idx = save.fishFeedPosts.findIndex(
+      (p) => p.id === postId && p.authorUid === playerFeedUid(get().account),
+    );
+    if (idx < 0) {
+      toast("只能删除自己的动态");
+      return false;
+    }
+    save.fishFeedPosts.splice(idx, 1);
+    const likes = { ...save.fishFeedPostLikes };
+    delete likes[postId];
+    save.fishFeedPostLikes = likes;
+    persist(save);
+    set({ save });
+    toast("动态已删除");
+    return true;
+  },
+
+  toggleFishFeedLike: (postId) => {
+    const save = { ...get().save };
+    const post = findFeedPost(postId, save);
+    if (!post) return;
+    const selfUid = playerFeedUid(get().account);
+    const base = postLikes(post, save);
+    const liked = base.includes(selfUid);
+    const next = liked ? base.filter((u) => u !== selfUid) : [...base, selfUid];
+    save.fishFeedPostLikes = { ...save.fishFeedPostLikes, [postId]: next };
+    const playerPost = save.fishFeedPosts.find((p) => p.id === postId);
+    if (playerPost) playerPost.likeUids = next;
+    persist(save);
+    set({ save });
   },
 
   login: async (account, password, remember = false) => {
@@ -911,7 +1146,7 @@ export const useGame = create<GameStore>((set, get) => ({
       set({ save });
     }
     get().settleDays(now);
-    get().resolveScent(now);
+    get().flushEggHatch();
     get().claimMonthlyIfNeeded();
     const inbox = get().save;
     const mailed = {
@@ -932,6 +1167,7 @@ export const useGame = create<GameStore>((set, get) => ({
       eggs: [...get().save.eggs],
       tanks: get().save.tanks.map((t) => ({ ...t })),
       foodStock: { ...get().save.foodStock },
+      caughtFishIds: [...get().save.caughtFishIds],
     };
     const days = (() => {
       const calendar = beijingCalendarDaysPassed(save.lastDayTickAt, now);
@@ -940,8 +1176,6 @@ export const useGame = create<GameStore>((set, get) => ({
       return Math.max(calendar, speedDays);
     })();
     if (days <= 0) return;
-    let newEggs = 0;
-    let newPairs = 0;
     let hostUnfed = 0;
     let hostBought = 0;
     for (let d = 0; d < days; d++) {
@@ -954,17 +1188,17 @@ export const useGame = create<GameStore>((set, get) => ({
       const deadCount = save.tank.filter((f) => f.dead).length;
       for (const f of save.tank) {
         if (f.dead) continue;
-        if (f.lastFedDay === endingDay) continue;
-        f.health = Math.max(0, f.health - healthDropForDay(f.health, deadCount));
+        if (fishFedToday(f, endingDay)) continue;
+        f.health = Math.max(0, f.health - healthDropForDay(effectiveHealthPercent(f), deadCount));
         if (f.health <= 0) {
           f.dead = true;
           breakPair(save, f.uid);
+        } else {
+          applyDailyGrowthWhenFull(f);
         }
         f.lastSettledAt = now;
       }
-      const tick = tickPairsAndEggs(save, endingDay);
-      newPairs += tick.pairs;
-      newEggs += tick.eggs;
+      tickPairsAndEggs(save, endingDay);
     }
     save.gameDay += days;
     save.lastDayTickAt = now;
@@ -973,25 +1207,15 @@ export const useGame = create<GameStore>((set, get) => ({
       save.timed = freshTimed(save.gameDay);
     }
     resetSatietyIfNewDay(save);
+    const hatched = hatchReadyEggs(save);
+    const sel = get().selectedEggUid;
     persist(save);
-    set({ save });
+    set({
+      save,
+      selectedEggUid: hatched > 0 && sel && !save.eggs.some((e) => e.uid === sel) ? null : sel,
+    });
     if (hostBought > 0) toast(`托管代买了 ${hostBought} 份鱼粮`);
     if (hostUnfed > 0) toast(`托管：${hostUnfed} 条没喂到`);
-    if (newPairs > 0) toast(`同缸自动结为配偶 ×${newPairs}`);
-    if (newEggs > 0) toast(`配偶在缸底下了 ${newEggs} 枚鱼卵`);
-  },
-
-  resolveScent: (now) => {
-    const save = {
-      ...get().save,
-      tank: get().save.tank.map((f) => ({ ...f })),
-      eggs: [...get().save.eggs],
-    };
-    const n = resolveScentLays(save, now, save.gameDay);
-    if (n <= 0) return;
-    persist(save);
-    set({ save });
-    toast(`求偶香催产：缸底下了 ${n} 枚鱼卵`);
   },
 
   simulateIdle: (now, force) => {
@@ -1067,6 +1291,7 @@ export const useGame = create<GameStore>((set, get) => ({
       return false;
     }
     save.gold += MONTHLY_CARD_DAILY_GOLD;
+    save.pearl += MONTHLY_CARD_DAILY_PEARL;
     save.lastMonthlyClaimDay = save.gameDay;
     persist(save);
     set({ save });
@@ -1090,7 +1315,7 @@ export const useGame = create<GameStore>((set, get) => ({
     let skipped = 0;
     save.basket = save.basket.filter((bf) => {
       if (!want.has(bf.uid)) return true;
-      if (!tankHasRoom(save, tankId, 1)) {
+      if (basketFishCountsTowardCapacity(bf) && !tankHasRoom(save, tankId, 1)) {
         skipped += 1;
         return true;
       }
@@ -1099,12 +1324,14 @@ export const useGame = create<GameStore>((set, get) => ({
         loveView: bf.loveView,
         sex: bf.sex,
         health: bf.health,
+        healthMax: bf.healthMax,
         lastFedDay: bf.lastFedDay,
       }));
       const added = save.tank[save.tank.length - 1];
       if (typeof bf.affection === "number") added.affection = Math.min(10, Math.max(0, bf.affection));
       if (bf.customName) added.customName = bf.customName;
-      if (!save.caughtFishIds.includes(bf.defId)) save.caughtFishIds.push(bf.defId);
+      if (bf.bodyBulk === 1 || bf.bodyBulk === 2 || bf.bodyBulk === 3) added.bodyBulk = bf.bodyBulk;
+      else syncAdultBodyBulk(added);
       count += 1;
       return false;
     });
@@ -1130,17 +1357,24 @@ export const useGame = create<GameStore>((set, get) => ({
     const fish = save.tank.find((f) => f.uid === uid);
     if (!fish || fish.dead) return "skip";
     const offer = foodId ?? save.equipped.food;
-    if ((save.foodStock[offer] ?? 0) <= 0) {
-      if (!opts?.quiet) toast("鱼粮不足");
-      return "empty";
+    if (!opts?.prepaid) {
+      if ((save.foodStock[offer] ?? 0) <= 0) {
+        if (!opts?.quiet) toast("鱼粮不足");
+        return "empty";
+      }
+    }
+    if (!canFeedFishToday(fish, save.gameDay)) {
+      if (!opts?.quiet) toast("今天吃饱了");
+      return "full";
     }
     if (!canFeed(fish.defId, offer)) {
       useUi.getState().cueTankFish(uid, "refuse");
       return "refused";
     }
-    save.foodStock[offer] -= 1;
+    if (!opts?.prepaid) save.foodStock[offer] -= 1;
     save.equipped.food = offer;
-    fish.lastFedDay = save.gameDay;
+    addFishFeedSatiety(fish, save.gameDay);
+    applyFeedGrowth(fish);
     addAffection(fish, affectionGainForFeed(fish.defId, offer));
     markDaily(save, "fed");
     applyQuest(save, "feed");
@@ -1167,6 +1401,11 @@ export const useGame = create<GameStore>((set, get) => ({
     for (const uid of uids) {
       const fish = save.tank.find((f) => f.uid === uid);
       if (!fish || fish.dead) continue;
+      if (!canFeedFishToday(fish, save.gameDay)) {
+        unhappy.push(fishDisplayName(fish));
+        useUi.getState().cueTankFish(uid, "refuse");
+        continue;
+      }
       const foodId = pickFoodForFish(fish.defId, foodIds, save.foodStock);
       if (!foodId) {
         unhappy.push(fishDisplayName(fish));
@@ -1175,7 +1414,8 @@ export const useGame = create<GameStore>((set, get) => ({
       }
       save.foodStock[foodId] -= 1;
       save.equipped.food = foodId;
-      fish.lastFedDay = save.gameDay;
+      addFishFeedSatiety(fish, save.gameDay);
+      applyFeedGrowth(fish);
       addAffection(fish, affectionGainForFeed(fish.defId, foodId));
       useUi.getState().cueTankFish(uid, "eat");
       ate += 1;
@@ -1209,16 +1449,24 @@ export const useGame = create<GameStore>((set, get) => ({
     const save = { ...get().save, tank: get().save.tank.map((f) => ({ ...f })) };
     const fish = save.tank.find((f) => f.uid === uid);
     if (!fish || fish.dead) return false;
-    if (!canNameFish(fish)) {
-      toast("好感满 10 才能起名");
-      return false;
-    }
     fish.customName = name;
     persist(save);
     set({ save });
     toast(`已起名「${name}」`);
     return true;
   },
+
+  spawnScatterPellet: () => {
+    const save = { ...get().save, foodStock: { ...get().save.foodStock } };
+    const foodId = save.equipped.food;
+    if ((save.foodStock[foodId] ?? 0) <= 0) return null;
+    save.foodStock[foodId] -= 1;
+    persist(save);
+    set({ save });
+    return foodId;
+  },
+
+  eatScatterPellet: (uid, foodId) => get().feed(uid, foodId, { quiet: true, prepaid: true }),
 
   petFish: (uid) => {
     const save = { ...get().save, tank: get().save.tank.map((f) => ({ ...f })) };
@@ -1304,7 +1552,8 @@ export const useGame = create<GameStore>((set, get) => ({
       toast("已经在这口缸里");
       return false;
     }
-    if (!tankHasRoom(save, destTankId, moving.length)) {
+    const capacityNeed = capacityNeedForFishUids(save, uniq);
+    if (capacityNeed > 0 && !tankHasRoom(save, destTankId, capacityNeed)) {
       toast("目标缸位不够");
       return false;
     }
@@ -1354,6 +1603,8 @@ export const useGame = create<GameStore>((set, get) => ({
         loveView: f.loveView,
         sex: f.sex,
         health: f.health,
+        healthMax: f.healthMax,
+        bodyBulk: f.bodyBulk,
         lastFedDay: f.lastFedDay,
         affection: f.affection,
         customName: f.customName,
@@ -1369,6 +1620,7 @@ export const useGame = create<GameStore>((set, get) => ({
       return false;
     }
     save.tank = save.tank.filter((f) => !moved.has(f.uid));
+    applyQuest(save, "basket");
     persist(save);
     set({
       save,
@@ -1531,19 +1783,14 @@ export const useGame = create<GameStore>((set, get) => ({
     return true;
   },
 
-  unpair: (pairId) => {
-    const save = { ...get().save, tank: get().save.tank.map((f) => ({ ...f })) };
-    const one = save.tank.find((f) => f.pairId === pairId);
-    if (one) breakPair(save, one.uid);
-    persist(save);
-    set({ save });
-    toast("已解除配偶");
-  },
-
   buyAttractant: (id) => {
     const def = ATTRACTANT_BY_ID[id];
     if (!def) return false;
-    const save = { ...get().save, attractantStock: { ...(get().save.attractantStock ?? {}) } };
+    const save = {
+      ...get().save,
+      attractantStock: { ...(get().save.attractantStock ?? {}) },
+      attractantLots: [...(get().save.attractantLots ?? [])],
+    };
     if (def.currency === "gold") {
       if (save.gold < def.price) {
         toast("金币不足");
@@ -1557,142 +1804,113 @@ export const useGame = create<GameStore>((set, get) => ({
       }
       save.pearl -= def.price;
     }
-    save.attractantStock[id] = (save.attractantStock[id] ?? 0) + 1;
+    save.attractantLots.push({ uid: genUid("al"), defId: id, boughtAt: Date.now() });
+    save.attractantStock = stockFromLots(save.attractantLots);
+    if (save.questStep === "q_mate" && ATTRACTANT_BY_ID[id]?.scope === "fish") {
+      save.guideMateShopDone = true;
+    }
     persist(save);
     set({ save });
     toast(`买到 ${def.name}`);
     return true;
   },
 
-  applyAttractantToFish: (uid, id) => {
-    const def = ATTRACTANT_BY_ID[id];
-    if (!def || def.scope !== "fish") return false;
+  sprayMatingScent: (fishAUid, fishBUid, lotUid) => {
+    const prev = get().save;
     const save = {
-      ...get().save,
-      tank: get().save.tank.map((f) => ({ ...f })),
-      attractantStock: { ...(get().save.attractantStock ?? {}) },
+      ...prev,
+      tank: prev.tank.map((f) => ({ ...f })),
+      attractantLots: [...(prev.attractantLots ?? [])],
     };
-    if ((save.attractantStock[id] ?? 0) <= 0) {
+    const lot = save.attractantLots.find((l) => l.uid === lotUid);
+    if (!lot || !ATTRACTANT_BY_ID[lot.defId]) {
       toast("没有这种求偶香");
       return false;
     }
-    const fish = save.tank.find((f) => f.uid === uid);
-    if (!fish || fish.dead) {
-      toast("选一条活鱼");
+    const a = save.tank.find((f) => f.uid === fishAUid);
+    const b = save.tank.find((f) => f.uid === fishBUid);
+    if (!a || !b) {
+      toast("选两条鱼");
       return false;
     }
-    const until = save.gameDay + def.durationDays - 1;
-    if ((fish.attractUntilDay ?? 0) < save.gameDay) {
-      fish.attractUntilDay = until;
-      fish.attractBonus = def.bonus;
-    } else {
-      fish.attractUntilDay = Math.max(fish.attractUntilDay, until);
-      fish.attractBonus = Math.max(fish.attractBonus ?? 0, def.bonus);
+    const reason = mateRefuseReason(a, b, save.gameDay);
+    if (reason) {
+      toast(reason);
+      return false;
     }
-    save.attractantStock[id] -= 1;
-    const now = Date.now();
-    if (scentBuyTimeForFish(save, uid, now)) {
-      persist(save);
-      set({ save });
-      toast(`${FISH_BY_ID[fish.defId]?.name ?? "鱼"} 已配对，5 分钟后产卵`);
-      return true;
-    }
+    save.attractantLots = save.attractantLots.filter((l) => l.uid !== lotUid);
+    save.attractantStock = stockFromLots(save.attractantLots);
+    if (save.questStep === "q_mate") save.guideMateSprayDone = true;
     persist(save);
     set({ save });
-    toast(`${FISH_BY_ID[fish.defId]?.name ?? "鱼"} 身上有求偶香了，持续 ${def.durationDays} 天`);
+    useUi.getState().clearMatePick();
+    useUi.getState().setTankMateSpray(false);
+    useUi.getState().setMatePanelOpen(false);
+    useUi.getState().setMatingSession({ fishA: fishAUid, fishB: fishBUid });
+    if (!save.guideMateLayHealthHintSeen) {
+      useUi.getState().openMateLayHealthHint();
+    }
+    toast("求偶香已喷，两条鱼靠近中…");
     return true;
   },
 
-  applyAttractantToTank: (id) => {
-    const def = ATTRACTANT_BY_ID[id];
-    if (!def || def.scope !== "tank") return false;
+  completeMating: (fishAUid, fishBUid, spawn) => {
+    const prev = get().save;
+    const beforeUids = new Set(prev.eggs.map((e) => e.uid));
     const save = {
-      ...get().save,
-      tanks: get().save.tanks.map((t) => ({ ...t })),
-      tank: get().save.tank.map((f) => ({ ...f })),
-      attractantStock: { ...(get().save.attractantStock ?? {}) },
+      ...prev,
+      tank: prev.tank.map((f) => ({ ...f })),
+      eggs: [...prev.eggs],
     };
-    if ((save.attractantStock[id] ?? 0) <= 0) {
-      toast("没有这种香氛");
-      return false;
-    }
-    const tank = save.tanks.find((t) => t.id === save.activeTankId);
-    if (!tank) return false;
-    const until = save.gameDay + def.durationDays - 1;
-    if ((tank.tankAttractUntilDay ?? 0) < save.gameDay) {
-      tank.tankAttractUntilDay = until;
-      tank.tankAttractBonus = def.bonus;
-    } else {
-      tank.tankAttractUntilDay = Math.max(tank.tankAttractUntilDay, until);
-      tank.tankAttractBonus = Math.max(tank.tankAttractBonus ?? 0, def.bonus);
-    }
-    save.attractantStock[id] -= 1;
-    const n = scentBuyTimeForTank(save, tank.id, Date.now());
+    const a = save.tank.find((f) => f.uid === fishAUid);
+    const b = save.tank.find((f) => f.uid === fishBUid);
+    if (!a || !b) return { laid: 0, eggUids: [] };
+    const { laid, reason } = layMatingEggs(save, a, b, save.gameDay, spawn);
+    const eggUids = save.eggs.filter((e) => !beforeUids.has(e.uid)).map((e) => e.uid);
+    if (laid > 0) toast(`母鱼产下 ${laid} 枚卵`);
+    else if (reason) toast(reason);
+    hatchReadyEggs(save);
     persist(save);
     set({ save });
-    toast(
-      n > 0
-        ? `${tank.name} 喷了香氛，${n} 对将在 5 分钟后产卵`
-        : `${tank.name} 喷了整缸香氛，持续 ${def.durationDays} 天`,
-    );
-    return true;
+    return { laid, eggUids };
   },
 
-  hatchEgg: (eggUid) => {
+  commitEggPositions: (positions) => {
+    if (positions.length === 0) return;
+    const prev = get().save;
+    const byUid = new Map(positions.map((p) => [p.uid, p]));
+    let changed = false;
+    const eggs = prev.eggs.map((e) => {
+      const p = byUid.get(e.uid);
+      if (!p) return e;
+      if (e.spawnX === p.x && e.spawnY === p.y) return e;
+      changed = true;
+      return { ...e, spawnX: p.x, spawnY: p.y };
+    });
+    if (!changed) return;
+    const save = { ...prev, eggs };
+    persist(save);
+    set({ save });
+  },
+
+  accelerateEgg: (eggUid, mode) => {
     const save = {
       ...get().save,
-      tank: [...get().save.tank],
+      tank: get().save.tank.map((f) => ({ ...f })),
       eggs: get().save.eggs.map((e) => ({ ...e })),
       caughtFishIds: [...get().save.caughtFishIds],
     };
     const egg = save.eggs.find((e) => e.uid === eggUid);
     if (!egg) return false;
-    if (!egg.started) {
-      const cost = hatchGoldForParents(egg.parentA, egg.parentB);
-      if (save.gold < cost) {
-        toast("金币不足");
-        return false;
-      }
-      save.gold -= cost;
-      egg.started = true;
-      egg.readyDay = save.gameDay + hatchDaysForParents(egg.parentA, egg.parentB);
-      persist(save);
-      set({ save });
-      toast(`已开工，${egg.readyDay - save.gameDay} 游戏天后可领苗`);
-      return true;
-    }
-    if (save.gameDay < egg.readyDay) {
-      toast(`还要等 ${egg.readyDay - save.gameDay} 天，可用珍珠或看广告加速`);
-      return false;
-    }
-    if (!tankHasRoom(save, egg.tankId, 1)) {
-      toast("鱼缸已满，先扩建或换缸");
-      return false;
-    }
-    const defId = pickOffspringDefId(egg.parentA, egg.parentB);
-    const born = rollOffspringTraits();
-    const child = makeTankFish(save, defId, egg.tankId, born);
-    save.tank.push(child);
-    save.eggs = save.eggs.filter((e) => e.uid !== eggUid);
-    if (!save.caughtFishIds.includes(defId)) save.caughtFishIds.push(defId);
-    checkFillTank(save);
-    persist(save);
-    set({ save, selectedEggUid: null });
-    toast(`孵出 ${FISH_BY_ID[defId]?.name ?? "鱼"}（种类像亲本，性格爱情观重掷）`);
-    return true;
-  },
-
-  accelerateEgg: (eggUid, mode) => {
-    const save = { ...get().save, eggs: get().save.eggs.map((e) => ({ ...e })) };
-    const egg = save.eggs.find((e) => e.uid === eggUid);
-    if (!egg) return false;
-    if (!egg.started) {
-      toast("先花金币开工");
-      return false;
-    }
     if (save.gameDay >= egg.readyDay) {
-      toast("已经可以领苗了");
-      return false;
+      hatchReadyEggs(save);
+      const sel = get().selectedEggUid;
+      persist(save);
+      set({
+        save,
+        selectedEggUid: sel && save.eggs.some((e) => e.uid === sel) ? sel : null,
+      });
+      return true;
     }
     if (mode === "pearl") {
       if (save.pearl < HATCH_PEARL) {
@@ -1702,10 +1920,33 @@ export const useGame = create<GameStore>((set, get) => ({
       save.pearl -= HATCH_PEARL;
     }
     egg.readyDay = Math.max(save.gameDay, egg.readyDay - 1);
+    toast(mode === "ad" ? "看完广告，孵化加快 1 天" : "已用珍珠加速 1 天");
+    hatchReadyEggs(save);
+    const sel = get().selectedEggUid;
     persist(save);
-    set({ save });
-    toast(mode === "ad" ? "看完广告，工期 −1 天" : "已用珍珠加速 1 天");
+    set({
+      save,
+      selectedEggUid: sel && save.eggs.some((e) => e.uid === sel) ? sel : null,
+    });
     return true;
+  },
+
+  flushEggHatch: () => {
+    const prev = get().save;
+    const save = {
+      ...prev,
+      tank: prev.tank.map((f) => ({ ...f })),
+      eggs: [...prev.eggs],
+      caughtFishIds: [...prev.caughtFishIds],
+    };
+    const n = hatchReadyEggs(save);
+    if (n <= 0) return;
+    const sel = get().selectedEggUid;
+    persist(save);
+    set({
+      save,
+      selectedEggUid: sel && save.eggs.some((e) => e.uid === sel) ? sel : null,
+    });
   },
 
   listEgg: (eggUid, price) => {
@@ -1715,7 +1956,7 @@ export const useGame = create<GameStore>((set, get) => ({
     const [egg] = save.eggs.splice(idx, 1);
     save.listings.push({
       uid: genUid("l"),
-      defId: egg.parentA,
+      defId: egg.defId ?? egg.parentA,
       price,
       source: "player",
       kind: "egg",
@@ -1724,6 +1965,52 @@ export const useGame = create<GameStore>((set, get) => ({
     persist(save);
     set({ save, selectedEggUid: null });
     toast("鱼卵已挂到鱼行");
+  },
+
+  renameEgg: (eggUid, raw) => {
+    const name = normalizeFishName(raw);
+    if (!name) {
+      toast("名字不能为空");
+      return false;
+    }
+    const save = { ...get().save, eggs: get().save.eggs.map((e) => ({ ...e })) };
+    const egg = save.eggs.find((e) => e.uid === eggUid);
+    if (!egg) return false;
+    egg.customName = name;
+    if (save.questStep === "q_mate" && save.guideMateSprayDone) {
+      applyQuest(save, "name_egg");
+    }
+    persist(save);
+    set({ save });
+    toast(`卵已起名「${name}」`);
+    return true;
+  },
+
+  moveEggToTank: (eggUid, destTankId) => {
+    const prev = get().save;
+    if (!prev.tanks.some((t) => t.id === destTankId)) return false;
+    const save = { ...prev, eggs: prev.eggs.map((e) => ({ ...e })) };
+    const egg = save.eggs.find((e) => e.uid === eggUid);
+    if (!egg) return false;
+    egg.tankId = destTankId;
+    save.activeTankId = destTankId;
+    persist(save);
+    set({ save });
+    toast(`卵已换到${save.tanks.find((t) => t.id === destTankId)?.name ?? "另一口缸"}`);
+    return true;
+  },
+
+  sellEggFromTank: (eggUid) => {
+    const save = { ...get().save, eggs: [...get().save.eggs] };
+    const egg = save.eggs.find((e) => e.uid === eggUid);
+    if (!egg) return;
+    const price = Math.max(2, Math.floor(hatchGoldForParents(egg.parentA, egg.parentB) * 0.65));
+    save.eggs = save.eggs.filter((e) => e.uid !== eggUid);
+    save.gold += price;
+    if (get().selectedEggUid === eggUid) set({ selectedEggUid: null });
+    persist(save);
+    set({ save });
+    toast(`卖掉鱼卵，到手 ${price} 金`);
   },
 
   hasFisheryCard: (fisheryId) => {
@@ -1857,6 +2144,10 @@ export const useGame = create<GameStore>((set, get) => ({
     const fid = get().selectedFisheryId;
     const fishery = fid ? FISHERY_BY_ID[fid] : null;
     if (!fishery) return null;
+    if (save.started && !save.guideSkipped && save.questStep === "q_catch") {
+      const minnow = FISH_BY_ID.minnow;
+      if (minnow) return { kind: "fish", fish: minnow };
+    }
     return pickBiteOutcome(fishery.pool, save.equipped.bait, effectiveLuck(save));
   },
 
@@ -2052,7 +2343,7 @@ export const useGame = create<GameStore>((set, get) => ({
     if (idx < 0) return;
     const [bf] = save.basket.splice(idx, 1);
     const def = FISH_BY_ID[bf.defId];
-    if (def) save.gold += def.sellPrice;
+    if (def) save.gold += basketSellPrice(def.sellPrice, bf.healthMax ?? ADULT_HEALTH_MAX);
     markDaily(save, "sold");
     applyQuest(save, "sell");
     persist(save);
@@ -2063,7 +2354,7 @@ export const useGame = create<GameStore>((set, get) => ({
     const fish = get().save.tank.find((f) => f.uid === tankUid);
     if (!fish) return;
     const def = FISH_BY_ID[fish.defId];
-    const price = def ? tankSellPrice(def.sellPrice, fish.health, fish.dead) : null;
+    const price = def ? tankSellPrice(def.sellPrice, fish.healthMax, fish.dead) : null;
     if (price == null) {
       toast("死鱼不能售卖，只能清理");
       return;
@@ -2080,6 +2371,10 @@ export const useGame = create<GameStore>((set, get) => ({
     applyQuest(save, "sell");
     persist(save);
     set({ save });
+  },
+
+  sellManyFromTank: (uids) => {
+    for (const uid of uids) get().sellFromTank(uid);
   },
 
   sellManyToMarket: (uids) => {
@@ -2136,7 +2431,7 @@ export const useGame = create<GameStore>((set, get) => ({
     }
     save.listings.splice(idx, 1);
     if (listing.kind === "egg") {
-      save.eggs.push({
+      const egg = {
         uid: genUid("e"),
         tankId: save.activeTankId,
         pairId: "",
@@ -2145,7 +2440,9 @@ export const useGame = create<GameStore>((set, get) => ({
         laidDay: save.gameDay,
         readyDay: 0,
         started: false,
-      });
+      };
+      scheduleEggHatch(egg, save.gameDay);
+      save.eggs.push(egg);
       toast("已下架，鱼卵回到当前缸底");
     } else {
       const t = rollTraits();
@@ -2161,7 +2458,7 @@ export const useGame = create<GameStore>((set, get) => ({
       const f = get().save.tank.find((x) => x.uid === uid);
       if (!f || f.dead) continue;
       const def = FISH_BY_ID[f.defId];
-      const fallback = def ? (tankSellPrice(def.sellPrice, f.health, false) ?? def.sellPrice) : 1;
+      const fallback = def ? (tankSellPrice(def.sellPrice, f.healthMax, false) ?? def.sellPrice) : 1;
       get().listFromTank(uid, priceOf ? priceOf(f.defId) : fallback);
     }
   },
@@ -2169,7 +2466,10 @@ export const useGame = create<GameStore>((set, get) => ({
   listMany: (uids, priceOf) => {
     for (const uid of uids) {
       const b = get().save.basket.find((x) => x.uid === uid);
-      if (b) get().listFish(uid, priceOf(b.defId));
+      if (!b) continue;
+      const def = FISH_BY_ID[b.defId];
+      const fallback = def ? basketSellPrice(def.sellPrice, b.healthMax ?? ADULT_HEALTH_MAX) : 1;
+      get().listFish(uid, priceOf ? priceOf(b.defId) : fallback);
     }
   },
 
@@ -2198,7 +2498,7 @@ export const useGame = create<GameStore>((set, get) => ({
     }
     save.gold -= listing.price;
     if (listing.kind === "egg") {
-      save.eggs.push({
+      const egg = {
         uid: genUid("e"),
         tankId: save.activeTankId,
         pairId: "",
@@ -2207,17 +2507,24 @@ export const useGame = create<GameStore>((set, get) => ({
         laidDay: save.gameDay,
         readyDay: 0,
         started: false,
-      });
+      };
+      scheduleEggHatch(egg, save.gameDay);
+      save.eggs.push(egg);
     } else {
       const t = rollTraits();
       save.basket.push({ uid: genUid("b"), defId: listing.defId, personality: t.personality, loveView: t.loveView });
+      unlockFishEncyclopedia(save, listing.defId);
     }
     if (listing.source !== "market") save.listings.splice(idx, 1);
     persist(save);
     set({ save });
     const bought = FISH_BY_ID[listing.defId];
     toast(listing.kind === "egg" ? "买下鱼卵，已放到当前缸底" : `买下 ${bought?.name ?? "鱼"}，进了鱼筐`);
-    if (listing.kind !== "egg") get().notifyQuest("buy_fish");
+    if (listing.kind !== "egg") {
+      if (save.questStep !== "q_buy_carp" || listing.defId === "crucian") {
+        get().notifyQuest("buy_fish");
+      }
+    }
     return true;
   },
 
@@ -2225,10 +2532,10 @@ export const useGame = create<GameStore>((set, get) => ({
     const save = { ...get().save, baitStock: { ...get().save.baitStock } };
     const def = CONSUMABLE_BY_ID[baitId];
     if (!def) return false;
-    const cost = def.baitPrice * 20 * packs;
+    const cost = def.baitPrice * BAIT_PACK_SIZE * packs;
     if (save.gold < cost) return false;
     save.gold -= cost;
-    save.baitStock[baitId] = (save.baitStock[baitId] ?? 0) + 20 * packs;
+    save.baitStock[baitId] = (save.baitStock[baitId] ?? 0) + BAIT_PACK_SIZE * packs;
     persist(save);
     set({ save });
     return true;
@@ -2557,10 +2864,16 @@ export const useGame = create<GameStore>((set, get) => ({
     const it = save.timed.items.find((x) => x.id === itemId);
     if (!it || it.claimed || it.progress < it.target) return;
     it.claimed = true;
-    save.gold += it.rewardGold;
+    const lv = grantQuestXp(save, it.rewardXp);
     persist(save);
     set({ save });
-    toast(`限时任务完成 +${it.rewardGold}金`);
+    if (lv.to > lv.from) {
+      const msg = lv.to >= PLAYER_LEVEL_MAX
+        ? `升到 ${lv.to} 级，能量已回满`
+        : `升到 ${lv.to} 级`;
+      toast(msg);
+    }
+    toast(`限时任务完成 +${it.rewardXp}经验`);
   },
 
   claimNewbieTask: (id) => {
@@ -2577,10 +2890,16 @@ export const useGame = create<GameStore>((set, get) => ({
     const progress = save.newbieTasks[def.progressKey] ?? 0;
     if (progress < def.target) return;
     save.newbieTasks.claimed[id] = true;
-    save.gold += def.rewardGold;
+    const lv = grantQuestXp(save, def.rewardXp);
     persist(save);
     set({ save });
-    toast(`新手任务：${def.title} +${def.rewardGold}金`);
+    if (lv.to > lv.from) {
+      const msg = lv.to >= PLAYER_LEVEL_MAX
+        ? `升到 ${lv.to} 级，能量已回满`
+        : `升到 ${lv.to} 级`;
+      toast(msg);
+    }
+    toast(`新手任务：${def.title} +${def.rewardXp}经验`);
   },
 
   topUpPearl: (amount) => {
@@ -2690,10 +3009,15 @@ export const useGame = create<GameStore>((set, get) => ({
   },
 
   leaveVisit: () => {
-    const save = { ...get().save, scene: "leaderboard" as const, visitNpcId: null };
+    const prev = get().save;
+    const completingTutorial = prev.questStep === "q_visit_temple" && prev.started && !prev.guideSkipped;
+    const save = { ...prev, scene: "leaderboard" as const, visitNpcId: null };
     persist(save);
     set({ save, selectedTankUid: null, selectedEggUid: null });
     get().notifyQuest("visit");
+    if (completingTutorial && get().save.questStep === "q_done") {
+      useUi.getState().openGuideTutorialComplete();
+    }
   },
 
   buyLeaderFish: (uid) => {
@@ -2729,6 +3053,7 @@ export const useGame = create<GameStore>((set, get) => ({
       health: fish.health,
       lastFedDay: fish.lastFedDay,
     });
+    unlockFishEncyclopedia(save, def.id);
     save.leaderTakenUids = [...save.leaderTakenUids, fish.uid];
     persist(save);
     set({ save, selectedTankUid: null });
@@ -2779,18 +3104,12 @@ export const useGame = create<GameStore>((set, get) => ({
       scentLayAt: 0,
       layCount: 0,
     };
-    const roll = rollPairAccept(mine, guestCopy, 0.12, { requireSameTank: false });
-    if (!roll.ok) {
-      toast(roll.reason === "这回没看对眼" ? `${npc.name}这边没看对眼` : roll.reason);
-      return false;
-    }
     save.gold -= price;
     save.tank.push(guestCopy);
-    bindPair(save, mine.uid, guestCopy.uid);
     save.leaderTakenUids = [...save.leaderTakenUids, guest.uid];
     persist(save);
     set({ save, selectedTankUid: null });
-    toast(`${npc.name}答应了，${def.name}进缸结为配偶`);
+    toast(`${npc.name}答应了，${def.name}进缸了`);
     return true;
   },
 
@@ -2963,6 +3282,24 @@ export const useGame = create<GameStore>((set, get) => ({
     useUi.getState().resetGuideHints();
     useUi.getState().setGuideReviewStep(step);
     const save = { ...cur, guideSkipped: false };
+    if (step === "q_feed") save.guideShopDone = false;
+    if (step === "q_tank") save.guideIdleDone = false;
+    if (step === "q_catch" || step === "q_go_fish") save.guideFightIntroDone = false;
+    if (step === "q_mate") {
+      save.guideMateShopDone = false;
+      save.guideMateSprayDone = false;
+      save.guideMateIntroSeen = false;
+    }
+    if (step === "q_fishchat") {
+      save.guideFishchatIntroSeen = false;
+      save.guideFishchatPostDone = false;
+      save.guideFishchatShowcaseDone = false;
+    }
+    if (step === "q_read_encyc") {
+      save.guideEncycDone = false;
+      save.guideEncycIntroSeen = false;
+    }
+    if (step === "q_mate") save.guideStaminaHinted = false;
     if (save.scene === "quests") save.scene = "aquarium";
     // 重温存缸 / 筐里有鱼在馆：相位 4（回程存鱼）。
     // 新流程里 q_feed 是第一步（起始鱼已在缸），不再设相位 5。
@@ -2977,6 +3314,96 @@ export const useGame = create<GameStore>((set, get) => ({
     persist(save);
     set({ save });
     toast("引导已开启");
+  },
+
+  ackFeatureIntro: (feature) => {
+    const save = { ...get().save };
+    if (feature === "mate") save.guideMateIntroSeen = true;
+    else if (feature === "fishchat") save.guideFishchatIntroSeen = true;
+    else save.guideEncycIntroSeen = true;
+    persist(save);
+    set({ save });
+  },
+
+  ackMateLayHealthHint: () => {
+    const save = { ...get().save };
+    if (!save.guideMateLayHealthHintSeen) {
+      save.guideMateLayHealthHintSeen = true;
+      persist(save);
+      set({ save });
+    }
+    useUi.getState().closeMateLayHealthHint();
+  },
+
+  markGuideStaminaHinted: () => {
+    const save = { ...get().save };
+    if (save.guideStaminaHinted) return;
+    save.guideStaminaHinted = true;
+    persist(save);
+    set({ save });
+  },
+
+  advanceGuideFightIntro: () => {
+    const step = useUi.getState().guideFightIntroStep;
+    if (step === 0) {
+      useUi.getState().setGuideFightIntroStep(1);
+      return;
+    }
+    if (step === 1) {
+      useUi.getState().setGuideFightIntroStep(2);
+      return;
+    }
+    if (step === 2) {
+      useUi.getState().setGuideFightIntroStep(null);
+      useUi.getState().setGuideFightCountdown(3);
+    }
+  },
+
+  completeGuideFightIntro: () => {
+    const save = { ...get().save };
+    if (!save.guideFightIntroDone) {
+      save.guideFightIntroDone = true;
+      persist(save);
+      set({ save });
+    }
+    useUi.getState().setGuideFightCountdown(null);
+  },
+
+  markGuideFishchatShowcaseDone: () => {
+    const save = { ...get().save };
+    if (save.guideFishchatShowcaseDone) return;
+    const reviewStep = useUi.getState().guideReviewStep;
+    if (!isFishchatGuideActive(save, reviewStep)) return;
+    const posted =
+      save.guideFishchatPostDone ||
+      hasSelfFeedPostToday(save, get().account);
+    if (!posted) return;
+    save.guideFishchatShowcaseDone = true;
+    persist(save);
+    set({ save });
+  },
+
+  closeFishChatGuide: () => {
+    const save = { ...get().save };
+    const reviewStep = useUi.getState().guideReviewStep;
+    const posted =
+      save.guideFishchatPostDone ||
+      hasSelfFeedPostToday(save, get().account);
+    if (
+      isFishchatGuideActive(save, reviewStep) &&
+      posted &&
+      save.guideFishchatShowcaseDone
+    ) {
+      if (save.questStep === "q_fishchat") {
+        applyQuest(save, "fishchat_post");
+      }
+      if (!save.guideFishchatPostDone) {
+        save.guideFishchatPostDone = true;
+      }
+      persist(save);
+      set({ save });
+    }
+    useUi.getState().closeFishChat();
   },
 
   answerGuidePrompt: (accept) => {

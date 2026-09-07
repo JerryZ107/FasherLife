@@ -1,5 +1,6 @@
 import type { Quality } from "../types";
 import { FISH_BY_ID } from "../data/fishDefs";
+import { STOOL_BY_ID } from "../data/equipmentDefs";
 import type { SaveData } from "../save/saveSchema";
 
 export const PLAYER_LEVEL_MAX = 30;
@@ -56,7 +57,9 @@ export function regenSecPerPoint(level: number): number {
 }
 
 export function xpToNext(level: number): number {
-  return 80 + (level - 1) * 40;
+  const lv = Math.min(PLAYER_LEVEL_MAX, Math.max(1, level));
+  // 1→2 需 100；引导线任务合计 ~88 + 钓鱼 ~20 ≈ 刚升 2 级（见 ADR-016）
+  return 60 + lv * 40;
 }
 
 export function satietyMax(_level?: number): number {
@@ -96,13 +99,15 @@ export function formatWait(ms: number): string {
   return r ? `${m} 分 ${r} 秒` : `${m} 分`;
 }
 
-export function idleStaminaCostForDef(defId: string): number {
+export function idleStaminaCostForDef(defId: string, stoolId?: string): number {
   const def = FISH_BY_ID[defId];
   const q = def?.quality ?? "common";
   const [lo, hi] = IDLE_STAMINA_RANGE[q];
   let h = 0;
   for (let i = 0; i < defId.length; i++) h = (h * 31 + defId.charCodeAt(i)) >>> 0;
-  return lo + (h % (hi - lo + 1));
+  const base = lo + (h % (hi - lo + 1));
+  const discount = stoolId ? (STOOL_BY_ID[stoolId]?.idleStaminaDiscount ?? 0) : 0;
+  return Math.max(1, Math.ceil(base * (1 - discount)));
 }
 
 export function cookRestore(defId: string, firstOfDay: boolean): number {
@@ -147,10 +152,29 @@ export function applyStaminaRegen(save: SaveData, now: number): void {
   addStamina(save, points);
 }
 
+export function grantQuestXp(save: SaveData, amount: number): { from: number; to: number } {
+  if (save.playerLevel >= PLAYER_LEVEL_MAX || amount <= 0) {
+    return { from: save.playerLevel, to: save.playerLevel };
+  }
+  const from = save.playerLevel;
+  save.playerXp += amount;
+  while (save.playerLevel < PLAYER_LEVEL_MAX && save.playerXp >= xpToNext(save.playerLevel)) {
+    save.playerXp -= xpToNext(save.playerLevel);
+    save.playerLevel += 1;
+    if (save.playerLevel === PLAYER_LEVEL_MAX) {
+      save.playerXp = 0;
+      save.stamina = staminaCap(PLAYER_LEVEL_MAX);
+    }
+  }
+  return { from, to: save.playerLevel };
+}
+
 export function grantCatchXp(save: SaveData, quality: Quality): { from: number; to: number } {
   if (save.playerLevel >= PLAYER_LEVEL_MAX) return { from: save.playerLevel, to: save.playerLevel };
   const from = save.playerLevel;
-  save.playerXp += XP_CATCH[quality] ?? 8;
+  const xpBonus = STOOL_BY_ID[save.equipped.stool]?.catchXpBonus ?? 0;
+  const gained = Math.round((XP_CATCH[quality] ?? 8) * (1 + xpBonus));
+  save.playerXp += gained;
   while (save.playerLevel < PLAYER_LEVEL_MAX && save.playerXp >= xpToNext(save.playerLevel)) {
     save.playerXp -= xpToNext(save.playerLevel);
     save.playerLevel += 1;

@@ -13,6 +13,7 @@ import type { SaveData } from "../save/saveSchema";
 import type { LoveView, Personality } from "../types";
 import { basketWeightKg, fishWeightKg } from "./weight";
 import { rollTraits } from "./traits";
+import { ADULT_HEALTH_MAX, CAUGHT_FISH_HEALTH } from "./growth";
 
 function genUid(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
@@ -120,7 +121,15 @@ export function addToBasket(
 ): boolean {
   if (!basketFits(save, fishDef)) return false;
   const t = traits ?? rollTraits();
-  save.basket.push({ uid: genUid("b"), defId: fishDef.id, personality: t.personality, loveView: t.loveView });
+  save.basket.push({
+    uid: genUid("b"),
+    defId: fishDef.id,
+    personality: t.personality,
+    loveView: t.loveView,
+    health: CAUGHT_FISH_HEALTH,
+    healthMax: ADULT_HEALTH_MAX,
+    caughtDay: save.gameDay,
+  });
   return true;
 }
 
@@ -143,7 +152,15 @@ export function replaceBasketFish(
   const idx = save.basket.findIndex((b) => b.uid === uid);
   if (idx < 0) return false;
   const t = traits ?? rollTraits();
-  save.basket[idx] = { uid: genUid("b"), defId: fishDef.id, personality: t.personality, loveView: t.loveView };
+  save.basket[idx] = {
+    uid: genUid("b"),
+    defId: fishDef.id,
+    personality: t.personality,
+    loveView: t.loveView,
+    health: CAUGHT_FISH_HEALTH,
+    healthMax: ADULT_HEALTH_MAX,
+    caughtDay: save.gameDay,
+  };
   return true;
 }
 

@@ -1,4 +1,5 @@
 import { useRef, type ButtonHTMLAttributes, type ReactNode } from "react";
+import { ADULT_HEALTH_MAX, fishGrowthStage, GROWTH_STAGE_LABEL } from "../game/growth";
 import { QUALITY_LABEL, type Quality } from "../types";
 import { BackChevron, GoldMark, PearlMark } from "./marks";
 
@@ -130,6 +131,14 @@ export function TabBar<T extends string>({
   );
 }
 
+export function ModalCloseX({ onClose }: { onClose: () => void }) {
+  return (
+    <button type="button" className="modal-close-x" onClick={onClose} aria-label="关闭">
+      ×
+    </button>
+  );
+}
+
 export function ModalSheet({
   title,
   children,
@@ -137,6 +146,7 @@ export function ModalSheet({
   wide,
   className = "",
   modalClassName = "",
+  showClose = true,
 }: {
   title?: ReactNode;
   children: ReactNode;
@@ -144,15 +154,21 @@ export function ModalSheet({
   wide?: boolean;
   className?: string;
   modalClassName?: string;
+  showClose?: boolean;
 }) {
   return (
     <div className={`modal-backdrop ${className}`.trim()} onClick={onClose}>
       <div
         className={`modal ${wide ? "wide" : ""} ${modalClassName}`.trim()}
         onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
       >
-        {title != null && <div className="modal-title">{title}</div>}
-        {children}
+        {showClose && <ModalCloseX onClose={onClose} />}
+        <div className="modal-scroll">
+          {title != null && <div className="modal-title">{title}</div>}
+          {children}
+        </div>
       </div>
     </div>
   );
@@ -207,15 +223,22 @@ export function QualityChip({ quality }: { quality: Quality }) {
   return <span className={`chip q ${quality}`}>{QUALITY_LABEL[quality]}</span>;
 }
 
-export function HealthBar({ value, compact = false }: { value: number; compact?: boolean }) {
-  const v = Math.max(0, Math.min(100, Math.round(value)));
-  const tone = v <= 0 ? "dead" : v < 60 ? "warn" : "ok";
+export function GrowthStageChip({ healthMax }: { healthMax?: number }) {
+  const stage = fishGrowthStage(healthMax ?? ADULT_HEALTH_MAX);
+  return <span className={`chip growth ${stage}`}>{GROWTH_STAGE_LABEL[stage]}</span>;
+}
+
+export function HealthBar({ value, max = 100, compact = false }: { value: number; max?: number; compact?: boolean }) {
+  const cap = Math.max(1, max);
+  const v = Math.max(0, Math.min(cap, Math.round(value)));
+  const pct = (v / cap) * 100;
+  const tone = v <= 0 ? "dead" : pct < 60 ? "warn" : "ok";
   return (
-    <span className={`hp ${tone} ${compact ? "compact" : ""}`} title={`健康 ${v}`}>
+    <span className={`hp ${tone} ${compact ? "compact" : ""}`} title={`健康 ${v}/${cap}`}>
       <span className="hp-track">
-        <span className="hp-fill" style={{ width: `${v}%` }} />
+        <span className="hp-fill" style={{ width: `${pct}%` }} />
       </span>
-      {!compact && <span className="hp-n">{v}</span>}
+      {!compact && <span className="hp-n">{v}/{cap}</span>}
     </span>
   );
 }
@@ -240,23 +263,33 @@ export function TankPlaque({
   used,
   cap,
   extra,
+  onClick,
 }: {
   name: string;
   quality?: Quality;
   used: number;
   cap: number;
   extra?: ReactNode;
+  onClick?: () => void;
 }) {
-  return (
-    <div className="tank-plaque">
+  const body = (
+    <>
       <div className="tank-plaque-name">
         <strong>{name}</strong>
         {quality ? <QualityChip quality={quality} /> : null}
         {extra}
       </div>
       <Occupancy used={used} cap={cap} />
-    </div>
+    </>
   );
+  if (onClick) {
+    return (
+      <div className="tank-plaque" role="button" tabIndex={0} onClick={onClick} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } }}>
+        {body}
+      </div>
+    );
+  }
+  return <div className="tank-plaque">{body}</div>;
 }
 
 export function EmptyHint({ children }: { children: ReactNode }) {
@@ -303,12 +336,14 @@ export function GoodsRow({
   icon,
   title,
   quality,
+  qualityExtra,
   hint,
   action,
 }: {
   icon?: ReactNode;
   title: ReactNode;
   quality?: Quality;
+  qualityExtra?: ReactNode;
   hint?: ReactNode;
   action?: ReactNode;
 }) {
@@ -320,6 +355,7 @@ export function GoodsRow({
           <div className="goods-title">
             {title}
             {quality ? <QualityChip quality={quality} /> : null}
+            {qualityExtra}
           </div>
           {hint ? <div className="dim">{hint}</div> : null}
         </div>

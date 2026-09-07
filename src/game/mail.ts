@@ -2,6 +2,21 @@ import { MAIL_BY_ID, MAIL_DEFS, MONTHLY_GOLD_MAIL, mailHasReward, type MailDef }
 import type { MailItem, SaveData } from "../save/saveSchema";
 import { genUid } from "./fishingLogic";
 
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+export function mailReceivedAt(m: MailItem, save: SaveData): number {
+  if (m.receivedAt && m.receivedAt > 0) return m.receivedAt;
+  const daysAgo = Math.max(0, save.gameDay - m.receivedDay);
+  return save.lastDayTickAt - daysAgo * 86_400_000;
+}
+
+export function formatMailReceivedAt(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
 export function copyMails(save: SaveData): MailItem[] {
   return (save.mails ?? []).map((m) => ({ ...m }));
 }
@@ -27,18 +42,7 @@ export function visibleMails(save: SaveData): MailItem[] {
       const def = MAIL_BY_ID[m.defId];
       return Boolean(def) && !mailExpired(m, day, def);
     })
-    .sort((a, b) => {
-      const ua = unreadRank(a);
-      const ub = unreadRank(b);
-      if (ua !== ub) return ua - ub;
-      return b.receivedDay - a.receivedDay;
-    });
-}
-
-function unreadRank(m: MailItem): number {
-  const def = MAIL_BY_ID[m.defId];
-  const pending = !m.read || (mailHasReward(def) && !m.claimed);
-  return pending ? 0 : 1;
+    .sort((a, b) => mailReceivedAt(b, save) - mailReceivedAt(a, save));
 }
 
 export function enqueueMonthlyGoldMail(save: SaveData, receivedDay: number): void {
@@ -47,6 +51,7 @@ export function enqueueMonthlyGoldMail(save: SaveData, receivedDay: number): voi
     uid: genUid("m"),
     defId: MONTHLY_GOLD_MAIL.id,
     receivedDay,
+    receivedAt: Date.now(),
     read: false,
     claimed: false,
   });
@@ -62,6 +67,7 @@ export function ensureInbox(save: SaveData): boolean {
       uid: genUid("m"),
       defId: def.id,
       receivedDay: save.gameDay,
+      receivedAt: Date.now(),
       read: false,
       claimed: !mailHasReward(def),
     });

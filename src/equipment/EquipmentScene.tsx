@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useGame } from "../store/gameStore";
-import { PART_BY_ID, PART_DEFS, ROD_BY_ID, STOOL_BY_ID, BASKET_BY_ID, basketShopHint, partStatHint, rodShopHint, stoolHint } from "../data/equipmentDefs";
+import { PART_BY_ID, PART_DEFS, ROD_BY_ID, STOOL_BY_ID, BASKET_BY_ID, basketShopHint, partStatHint, rodShopHint, stoolHint, rodGearBlurb, stoolGearBlurb } from "../data/equipmentDefs";
 import { CONSUMABLE_BY_ID, baitShopHint } from "../data/consumableDefs";
 import { OUTFIT_DEFS } from "../data/outfitDefs";
 import { BOOK_DEFS } from "../data/bookDefs";
@@ -32,6 +32,24 @@ export default function EquipmentScene() {
   const [swapSlot, setSwapSlot] = useState<RodPartSlot | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const setEquipCurrentTab = useUi((s) => s.setEquipCurrentTab);
+  const stackReturn = useUi((s) => s.stackReturn);
+  const setStackReturn = useUi((s) => s.setStackReturn);
+  const setEncycReturn = useUi((s) => s.setEncycReturn);
+  const equipTabPref = useUi((s) => s.equipTabPref);
+  const clearEquipTabPref = useUi((s) => s.clearEquipTabPref);
+
+  function leave() {
+    const back = stackReturn === "profile" ? "profile" : "aquarium";
+    setStackReturn(null);
+    setScene(back);
+  }
+
+  useEffect(() => {
+    if (!equipTabPref) return;
+    const allowed: Tab[] = ["rod", "bait", "stool", "basket", "energy", "outfit", "book"];
+    if (allowed.includes(equipTabPref as Tab)) setTab(equipTabPref as Tab);
+    clearEquipTabPref();
+  }, [equipTabPref, clearEquipTabPref]);
 
   useEffect(() => {
     setEquipCurrentTab(tab);
@@ -55,7 +73,7 @@ export default function EquipmentScene() {
 
   return (
     <Page>
-      <PageHead onBack={() => setScene("aquarium")} title="背包" />
+      <PageHead onBack={leave} title="背包" backLabel={stackReturn === "profile" ? "主页" : "水族馆"} />
       <TabBar
         items={[
           { id: "rod", label: "鱼竿" },
@@ -73,28 +91,40 @@ export default function EquipmentScene() {
         {tab === "rod" && (
           <>
             <p className="dim" style={{ padding: "4px 14px" }}>
-              点一根竿，可换轮、线、钩、漂。
+              {rodGearBlurb()}右侧可装备或改装配件（轮、线、钩、漂）。
             </p>
             {save.ownedRods.map((id) => {
               const r = ROD_BY_ID[id];
+              const equipped = save.equipped.rod === id;
               return (
-                <button
+                <GoodsRow
                   key={id}
-                  className={`panel fish-pick ${save.equipped.rod === id ? "picked" : ""}`}
-                  onClick={() => {
-                    equip("rod", id);
-                    setRodInspect(id);
-                  }}
-                >
-                  <GearIcon kind="rod" size={48} />
-                  <span className="fish-pick-meta">
-                    <strong>{r.name}</strong>
-                    <QualityChip quality={r.quality} />
-                    <span className="dim">
-                      {rodShopHint(r)} · {save.equipped.rod === id ? "使用中 · 点开换配件" : "点按装备"}
-                    </span>
-                  </span>
-                </button>
+                  icon={<GearIcon kind="rod" size={48} />}
+                  title={r.name}
+                  quality={r.quality}
+                  hint={`${rodShopHint(r)}${equipped ? " · 使用中" : ""}`}
+                  action={
+                    <div className="row equip-rod-actions">
+                      <button
+                        type="button"
+                        className={equipped ? "primary" : ""}
+                        onClick={() => equip("rod", id)}
+                      >
+                        装备
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          equip("rod", id);
+                          setRodInspect(id);
+                          setSwapSlot(null);
+                        }}
+                      >
+                        改装
+                      </button>
+                    </div>
+                  }
+                />
               );
             })}
             {rodInspect && ROD_BY_ID[rodInspect] && (
@@ -173,7 +203,7 @@ export default function EquipmentScene() {
         {tab === "stool" && (
           <>
             <p className="dim" style={{ padding: "4px 14px" }}>
-              影响搏斗时滑块大小。
+              {stoolGearBlurb()}
             </p>
             {save.ownedStools.map((id) => {
               const s = STOOL_BY_ID[id];
@@ -315,7 +345,16 @@ export default function EquipmentScene() {
           <>
             <div className="panel">
               <h2>可阅读书籍</h2>
-              <button className="primary" data-guide="open-encyc" onClick={() => setScene("encyclopedia")}>阅读图鉴</button>
+              <button
+                className="primary"
+                data-guide="open-encyc"
+                onClick={() => {
+                  setEncycReturn("equipment");
+                  setScene("encyclopedia");
+                }}
+              >
+                阅读图鉴
+              </button>
             </div>
             {BOOK_DEFS.filter((b) => save.ownedBooks.includes(b.id)).map((b) => (
               <GoodsRow key={b.id} title={b.name} hint={b.hint} />

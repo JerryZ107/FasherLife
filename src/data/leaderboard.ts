@@ -64,6 +64,8 @@ function fishes(prefix: string, tankId: string, rows: Spec[]): TankFish[] {
     uid: `${prefix}_${tankId}_${i}`,
     defId: r.d,
     health: r.hp ?? 86 + ((i * 3) % 12),
+    healthMax: 100,
+    mateRestUntilDay: 0,
     dead: false,
     lastFedDay: 0,
     lastSettledAt: 0,

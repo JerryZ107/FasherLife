@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useGame } from "../store/gameStore";
 import { useUi } from "../store/uiStore";
 import { CONSUMABLE_DEFS, baitShopHint, foodIdFromBait, foodShopHint } from "../data/consumableDefs";
+import { BAIT_PACK_SIZE } from "../game/constants";
 import {
   BASKET_BY_ID,
   BASKET_DEFS,
@@ -14,13 +15,15 @@ import {
   partStatHint,
   rodShopHint,
   stoolHint,
+  rodGearBlurb,
+  stoolGearBlurb,
 } from "../data/equipmentDefs";
 import { OUTFIT_DEFS } from "../data/outfitDefs";
 import { BOOK_DEFS } from "../data/bookDefs";
 import { TANK_DEFS, tankShopHint } from "../data/tankDefs";
 import { ATTRACTANT_DEFS, attractantShopHint } from "../data/attractantDefs";
 import { ROD_PART_LABEL } from "../types";
-import { MONTHLY_CARD_DAILY_GOLD, MONTHLY_CARD_DAYS, PEARL_TO_GOLD } from "../game/constants";
+import { MONTHLY_CARD_DAILY_GOLD, MONTHLY_CARD_DAILY_PEARL, MONTHLY_CARD_DAYS, PEARL_TO_GOLD } from "../game/constants";
 import { ENERGY_DRINK_PRICE, ENERGY_DRINK_STAMINA, SALT_PACK_SIZE, SALT_PRICE } from "../game/stamina";
 import { monthlyCardActive, monthlyDaysLeft } from "../game/monthlyCard";
 import { ensureTankSlotArray, hasEmptySlot } from "../game/tanks";
@@ -84,7 +87,7 @@ export default function ShopScene() {
           { id: "gear", label: "装备" },
           { id: "food", label: "鱼粮", guide: "shop-food" },
           { id: "tank", label: "鱼缸" },
-          { id: "attractant", label: "求偶香" },
+          { id: "attractant", label: "求偶香", guide: "shop-attractant" },
           { id: "stamina", label: "道具" },
           { id: "pearl", label: "珍珠" },
         ]}
@@ -112,7 +115,7 @@ export default function ShopScene() {
             <div className="panel">
               <h2>月卡 · 30 元</h2>
               <p className="dim">
-                每日 {MONTHLY_CARD_DAILY_GOLD} 金 · 漏登进邮箱 · 可叠加
+                每日 {MONTHLY_CARD_DAILY_GOLD} 金 + {MONTHLY_CARD_DAILY_PEARL} 珍珠 · 漏登进邮箱 · 可叠加
               </p>
               <p>
                 {monthlyCardActive(save)
@@ -260,7 +263,7 @@ export default function ShopScene() {
             <p className="dim" style={{ padding: "4px 14px" }}>
               喂单条或喷整缸，详情看说明。
             </p>
-            {ATTRACTANT_DEFS.map((a) => {
+            {ATTRACTANT_DEFS.map((a, i) => {
               const can = afford(save.gold, save.pearl, a.currency, a.price);
               const n = save.attractantStock?.[a.id] ?? 0;
               return (
@@ -269,7 +272,15 @@ export default function ShopScene() {
                   title={a.name}
                   quality={a.quality}
                   hint={attractantShopHint(a, n)}
-                  action={<PriceBtn currency={a.currency} price={a.price} disabled={!can} onClick={() => buyAttractant(a.id)} />}
+                  action={
+                    <PriceBtn
+                      currency={a.currency}
+                      price={a.price}
+                      disabled={!can}
+                      data-guide={a.scope === "fish" && i === 0 ? "shop-scent-list" : undefined}
+                      onClick={() => buyAttractant(a.id)}
+                    />
+                  }
                 />
               );
             })}
@@ -278,7 +289,7 @@ export default function ShopScene() {
         {tab === "gear" && gear === "rod" && (
           <>
             <p className="dim" style={{ padding: "4px 14px" }}>
-              买竿带配套四件，改装去背包页。
+              {rodGearBlurb()}买竿带配套四件，改装去背包页。
             </p>
             {ROD_DEFS.filter((r) => !r.hiddenFromShop).map((r) => {
               const owned = save.ownedRods.includes(r.id);
@@ -323,24 +334,28 @@ export default function ShopScene() {
         {tab === "gear" && gear === "bait" && (
           <>
             <p className="dim" style={{ padding: "4px 14px" }}>
-              每次下竿用 1 个。20 个一袋。
+              每次下竿用 1 个。{BAIT_PACK_SIZE} 个一袋。
             </p>
-            {CONSUMABLE_DEFS.filter((c) => !c.hiddenFromShop).map((c) => (
+            {CONSUMABLE_DEFS.filter((c) => !c.hiddenFromShop).map((c) => {
+              const cost = c.baitPrice * BAIT_PACK_SIZE;
+              return (
               <GoodsRow
                 key={c.id}
                 icon={<GearIcon kind="bait" size={48} />}
                 title={c.name}
                 quality={c.quality}
+                qualityExtra={<span className="chip bait-pack">*{BAIT_PACK_SIZE}</span>}
                 hint={baitShopHint(c)}
-                action={<PriceBtn currency="gold" price={c.baitPrice * 20} label="买×20" disabled={save.gold < c.baitPrice * 20} onClick={() => buyBaitPack(c.id, 1)} />}
+                action={<PriceBtn currency="gold" price={cost} disabled={save.gold < cost} onClick={() => buyBaitPack(c.id, 1)} />}
               />
-            ))}
+              );
+            })}
           </>
         )}
         {tab === "gear" && gear === "stool" && (
           <>
             <p className="dim" style={{ padding: "4px 14px" }}>
-              玩家滑块尺寸。
+              {stoolGearBlurb()}
             </p>
             {STOOL_DEFS.map((s) => {
               const owned = save.ownedStools.includes(s.id);

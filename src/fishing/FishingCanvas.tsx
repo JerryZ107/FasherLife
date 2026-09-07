@@ -1,6 +1,8 @@
 import { useEffect, useRef } from "react";
-import { Application, Graphics, Container } from "pixi.js";
+import { Application, Graphics, Container, Text } from "pixi.js";
 import type { FishDef, Personality } from "../types";
+import { FIGHT_PROGRESS_GAIN } from "../types";
+import { computeOverlayFightSliderLayout, type FightSliderLayout } from "./fightSliderLayout";
 
 export interface GearMods {
   sensitivity: number;
@@ -15,9 +17,13 @@ interface Props {
   holding: boolean;
   overlay?: boolean;
   personality?: Personality;
+  paused?: boolean;
+  /** player=仅练拇指（鱼与进度冻结）；frozen=全冻结。 */
+  fightTutorial?: "player" | "frozen" | null;
   onWin: () => void;
   onLose: () => void;
   onProgress: (p: number) => void;
+  onSliderLayout?: (layout: FightSliderLayout) => void;
 }
 
 function clamp01(v: number, lo = 0.05, hi = 0.95): number {
@@ -29,35 +35,62 @@ const HOT_HI = 0.88;
 const HOT_HOLD = 1.8;
 const ALOOF_DIST = 0.22;
 const ALOOF_DASH = 0.34;
-const TRAIL_N = 10;
 
 function easeOutCubic(u: number): number {
   const x = Math.max(0, Math.min(1, u));
   return 1 - (1 - x) ** 3;
 }
 
-/** 中间水面+钓者，右边竖槽两条滑块（ADR-001 / ADR-012 / ADR-018）。 */
+/** 竖槽滑块底板（矩形，非鱼形）。 */
+function paintSliderBlock(
+  g: Graphics,
+  barX: number,
+  barW: number,
+  cy: number,
+  height: number,
+  fill: number,
+  highlight: number,
+) {
+  const top = cy - height / 2;
+  g.roundRect(barX + 4, top, barW - 8, height, 6);
+  g.fill({ color: fill, alpha: 0.9 });
+  g.roundRect(barX + 6, top + 2, barW - 14, Math.max(4, height * 0.26), 4);
+  g.fill({ color: highlight, alpha: 0.38 });
+  g.roundRect(barX + 4, top, barW - 8, height, 6);
+  g.stroke({ color: 0x24160c, width: 1.2, alpha: 0.35 });
+}
+
+/** 中间水面+钓者，竖槽两条滑块（ADR-001 / ADR-012 / ADR-018）。 */
 export default function FishingCanvas({
   fishDef,
   mods,
   holding,
   overlay,
   personality = "docile",
+  paused = false,
+  fightTutorial = null,
   onWin,
   onLose,
   onProgress,
+  onSliderLayout,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const holdingRef = useRef(holding);
+  const pausedRef = useRef(paused);
+  const fightTutorialRef = useRef(fightTutorial);
   const doneRef = useRef(false);
   const onWinRef = useRef(onWin);
   const onLoseRef = useRef(onLose);
   const onProgressRef = useRef(onProgress);
+  const onSliderLayoutRef = useRef(onSliderLayout);
 
   holdingRef.current = holding;
+  pausedRef.current = paused;
+  fightTutorialRef.current = fightTutorial;
   onWinRef.current = onWin;
   onLoseRef.current = onLose;
   onProgressRef.current = onProgress;
+  onSliderLayoutRef.current = onSliderLayout;
 
   useEffect(() => {
     const el = hostRef.current;
@@ -69,11 +102,11 @@ export default function FishingCanvas({
 
     const state = {
       fishY: 0.5,
-      playerY: 0.5, // 钓到后人物滑块从槽中间开始
+      playerY: fightTutorial === "player" ? 0.98 : 0.5,
       fishVel: 0,
       progress: 30,
       t: 0,
-      spawnLock: 0.35,
+      spawnLock: fightTutorial === "player" ? 0 : 0.35,
       hotDir: -1,
       hotHold: 0,
       hotEnd: HOT_LO,
@@ -86,7 +119,6 @@ export default function FishingCanvas({
       aloofDash: 0,
       aloofFrom: 0.5,
       aloofTo: 0.5,
-      trail: [] as number[],
     };
 
     app.init({ backgroundAlpha: 0, resizeTo: el, antialias: true }).then(() => {
@@ -99,12 +131,22 @@ export default function FishingCanvas({
       const water = new Graphics();
       const angler = new Graphics();
       const track = new Graphics();
-      stage.addChild(water, angler, track);
+      const fishEmoji = new Text({
+        text: "🐠",
+        style: {
+          fontFamily: "Segoe UI Emoji, Apple Color Emoji, Noto Color Emoji, sans-serif",
+          fontSize: 44,
+        },
+      });
+      fishEmoji.anchor.set(0.5);
+      fishEmoji.rotation = Math.PI / 2;
+      stage.addChild(water, angler, track, fishEmoji);
 
       let last = performance.now();
       const mo = fishDef.motion;
       const fishSize = mo.sliderSize + mods.fishSliderBonus;
       const playerSize = mods.playerSliderSize;
+      const progressGain = FIGHT_PROGRESS_GAIN[fishDef.quality];
       const freq = personality === "docile" ? mo.frequency * 0.55 : mo.frequency;
       const noiseW = personality === "docile" ? 0 : mo.noiseWeight;
       const damp = personality === "docile" ? 0.8 : 0.92;
@@ -116,6 +158,12 @@ export default function FishingCanvas({
         state.t += dt;
         state.aloofCd = Math.max(0, state.aloofCd - dt);
 
+        if (!pausedRef.current) {
+        const tut = fightTutorialRef.current;
+        const freezeAll = tut === "frozen";
+        const freezeFish = freezeAll || tut === "player";
+
+        if (!freezeFish) {
         if (personality === "hot") {
           const oneWay = 0.4 / Math.max(0.2, mo.speed);
           const v = (HOT_HI - HOT_LO) / oneWay;
@@ -194,9 +242,11 @@ export default function FishingCanvas({
           state.fishVel *= damp;
           state.fishY = clamp01(state.fishY + state.fishVel * dt * 3);
         }
+        }
 
-        // 按住上升（Y↓）、松开下降（Y↑）；开局短暂锁在中间，方便看清初始位置
-        if (state.spawnLock > 0 && !holdingRef.current) {
+        if (!freezeAll) {
+        // 按住上升（Y↓）、松开下降（Y↑）；教学第一步从槽底开始
+        if (tut !== "player" && state.spawnLock > 0 && !holdingRef.current) {
           state.spawnLock = Math.max(0, state.spawnLock - dt);
           state.playerY = 0.5;
         } else {
@@ -204,15 +254,16 @@ export default function FishingCanvas({
           const lift = holdingRef.current ? -0.9 : 0.7;
           state.playerY = clamp01(state.playerY + lift * mods.sensitivity * dt, 0.02, 0.98);
         }
+        }
 
-        state.trail.push(state.fishY);
-        if (state.trail.length > TRAIL_N) state.trail.shift();
-
+        if (!freezeAll && !tut) {
         const overlap = Math.abs(state.fishY - state.playerY) < (fishSize + playerSize) / 2;
-        if (overlap) state.progress += 30 * mods.progressRate * dt;
+        if (overlap) state.progress += 30 * mods.progressRate * progressGain * dt;
         else state.progress -= 22 * mods.progressRate * dt;
         state.progress = Math.max(0, Math.min(100, state.progress));
         onProgressRef.current(state.progress);
+        }
+        }
 
         const w = app.screen.width;
         const h = app.screen.height;
@@ -240,8 +291,9 @@ export default function FishingCanvas({
         }
 
         const pad = overlay ? 6 : 16;
-        const barX = overlay ? 4 : sceneW + 18;
-        const barW = overlay ? Math.max(20, w - 8) : Math.max(22, w - sceneW - 36);
+        const baseBarW = overlay ? Math.min(48, w - pad * 2) : Math.max(22, w - sceneW - 36);
+        const barW = baseBarW * 2;
+        const barX = overlay ? (w - barW) / 2 : sceneW + 18;
         const barH = h - pad * 2;
         track.clear();
         track.roundRect(barX - 3, pad - 3, barW + 6, barH + 6, 10);
@@ -257,32 +309,31 @@ export default function FishingCanvas({
           track.stroke({ color: 0x3a6a48, width: 1, alpha: 0.35 });
         }
         const fishH = fishSize * barH;
-        for (let i = 0; i < state.trail.length; i++) {
-          const a = ((i + 1) / state.trail.length) * 0.32;
-          const ty = pad + state.trail[i] * barH;
-          track.roundRect(barX + 4, ty - fishH / 2, barW - 8, fishH, 5);
-          track.fill({ color: 0xef476f, alpha: a });
-        }
         const fy = pad + state.fishY * barH;
-        track.roundRect(barX + 2, fy - fishH / 2, barW - 4, fishH, 6);
-        track.fill({ color: 0xef476f, alpha: 0.96 });
-        track.roundRect(barX + 4, fy - fishH / 2 + 2, barW - 10, Math.max(4, fishH * 0.35), 4);
-        track.fill({ color: 0xffc4d0, alpha: 0.45 });
         const py = pad + state.playerY * barH;
-        track.roundRect(barX + 4, py - (playerSize * barH) / 2, barW - 8, playerSize * barH, 6);
-        track.fill({ color: 0x5ad8a0, alpha: 0.88 });
-        track.roundRect(barX + 6, py - (playerSize * barH) / 2 + 2, barW - 14, Math.max(4, playerSize * barH * 0.32), 4);
-        track.fill({ color: 0xe8ffe8, alpha: 0.4 });
-
-        if (state.progress >= 100) {
-          doneRef.current = true;
-          onWinRef.current();
-          return;
+        const playerH = playerSize * barH;
+        if (overlay) {
+          onSliderLayoutRef.current?.(
+            computeOverlayFightSliderLayout(w, h, fishSize, playerSize, state.fishY, state.playerY),
+          );
         }
-        if (state.progress <= 0) {
-          doneRef.current = true;
-          onLoseRef.current();
-          return;
+        paintSliderBlock(track, barX, barW, fy, fishH, 0xf0b429, 0xffe08a);
+        paintSliderBlock(track, barX, barW, py, playerH, 0x5ad8a0, 0xe8ffe8);
+        fishEmoji.x = barX + barW / 2;
+        fishEmoji.y = fy;
+        fishEmoji.style.fontSize = Math.max(28, Math.min(60, fishH * 1.24));
+
+        if (!pausedRef.current && !fightTutorialRef.current) {
+          if (state.progress >= 100) {
+            doneRef.current = true;
+            onWinRef.current();
+            return;
+          }
+          if (state.progress <= 0) {
+            doneRef.current = true;
+            onLoseRef.current();
+            return;
+          }
         }
         raf = requestAnimationFrame(loop);
       };
@@ -294,7 +345,7 @@ export default function FishingCanvas({
       cancelAnimationFrame(raf);
       app.destroy(true);
     };
-  }, [fishDef, mods, overlay, personality]);
+  }, [fishDef, mods, overlay, personality, paused, fightTutorial]);
 
   return <div ref={hostRef} className="fishing-canvas" />;
 }

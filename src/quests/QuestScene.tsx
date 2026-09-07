@@ -63,7 +63,7 @@ export default function QuestScene() {
                 </div>
               )}
               <p className="dim" style={{ marginTop: 8, fontSize: 12, lineHeight: 1.45 }}>
-                共 {QUEST_DEFS.length} 步：喂食 → 卖鱼 → 图鉴 → 钓鱼 → 入缸 → 买鲫鱼 → 做菜 → 吃菜 →{" "}
+                共 {QUEST_DEFS.length} 步：钓鱼 → 存缸 → 存筐 → 卖鱼 → 喂食 → 买鲫鱼 → 做菜 → 吃菜 → 配偶 → 渔聊 → 图鉴 →{" "}
                 <strong>圣殿排行参观</strong>
               </p>
               <button className="primary" style={{ marginTop: 8 }} onClick={() => replay()}>
@@ -102,7 +102,7 @@ export default function QuestScene() {
         {tab === "newbie" && (
           <>
             <p className="dim" style={{ padding: "4px 14px" }}>
-              完成可领 20 金，与界面引导无关，慢慢做就行。
+              完成可领经验，与界面引导无关，慢慢做就行。
             </p>
             {NEWBIE_TASK_DEFS.map((t) => {
               const progress = nt[t.progressKey] ?? 0;
@@ -114,7 +114,7 @@ export default function QuestScene() {
                     <strong>{t.title}</strong>
                     <div className="dim">{t.hint}</div>
                     <div className="dim" style={{ marginTop: 4 }}>
-                      进度 {Math.min(progress, t.target)}/{t.target} · +{t.rewardGold}金
+                      进度 {Math.min(progress, t.target)}/{t.target} · +{t.rewardXp}经验
                     </div>
                   </div>
                   {claimed ? (
@@ -146,7 +146,7 @@ export default function QuestScene() {
                     <strong>{it.title}</strong>
                     <div className="dim">{it.hint}</div>
                     <div className="dim" style={{ marginTop: 4 }}>
-                      进度 {Math.min(it.progress, it.target)}/{it.target} · +{it.rewardGold}金
+                      进度 {Math.min(it.progress, it.target)}/{it.target} · +{it.rewardXp}经验
                     </div>
                   </div>
                   {timedExpired ? (

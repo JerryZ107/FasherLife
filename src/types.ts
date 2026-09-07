@@ -28,18 +28,27 @@ export const QUALITY_TIER_RATE: Record<Quality, number> = {
   ultimate: 0.0003,
 };
 
+/** 搏斗重叠时进度增速（相对基础 30/s），按鱼品质递减。 */
+export const FIGHT_PROGRESS_GAIN: Record<Quality, number> = {
+  common: 0.7,
+  fine: 0.5,
+  rare: 0.3,
+  precious: 0.1,
+  ultimate: 0.05,
+};
+
 export type Sex = "male" | "female";
 export const SEX_LABEL: Record<Sex, string> = { male: "公", female: "母" };
 
 /** 互斥性格（ADR-018）。 */
 export type Personality = "hot" | "docile" | "timid" | "aloof";
 export const PERSONALITIES: Personality[] = ["hot", "docile", "timid", "aloof"];
-/** 生成实例时加权（ADR-018）：温顺 35 / 暴躁 25 / 高冷 25 / 胆小 15。 */
+/** 生成实例时加权（ADR-018）：温顺 35 / 暴躁 10 / 高冷 20 / 胆小 35。 */
 export const PERSONALITY_WEIGHT: Record<Personality, number> = {
   docile: 35,
-  hot: 25,
-  aloof: 25,
-  timid: 15,
+  hot: 10,
+  aloof: 20,
+  timid: 35,
 };
 export const PERSONALITY_LABEL: Record<Personality, string> = {
   hot: "暴躁",
@@ -149,7 +158,7 @@ export interface RodDef {
   /** 货币：gold 或 pearl。同品质金币竿与珍珠竿数值持平（ADR-003）。 */
   currency: "gold" | "pearl";
   price: number;
-  /** 手杆系数，乘在已装备的四件组件上。 */
+  /** 手杆系数：乘四件组件；玩家滑块尺寸 = 底值 × c。 */
   coefficient: number;
   hiddenFromShop?: boolean;
   /** 整竿配套的四件组件 id。 */
@@ -184,15 +193,17 @@ export interface BookDef {
   playerSliderBonus: number;
 }
 
-/** 板凳：影响玩家滑块尺寸。 */
+/** 板凳：每条只有一种效果——减挂机体力消耗，或加钓鱼经验。 */
 export interface StoolDef {
   id: string;
   name: string;
   quality: Quality;
   price: number;
   currency: "gold" | "pearl";
-  /** 玩家滑块尺寸加成。 */
-  playerSliderBonus: number;
+  /** 挂机每次咬钩体力消耗减免比例 0~1（与 catchXpBonus 互斥）。 */
+  idleStaminaDiscount?: number;
+  /** 钓鱼获得经验加成比例 0~1（与 idleStaminaDiscount 互斥）。 */
+  catchXpBonus?: number;
 }
 
 /** 鱼筐：影响容量上限。 */
@@ -259,12 +270,15 @@ export type QuestTrigger =
   | "cast"
   | "catch"
   | "tank"
+  | "basket"
   | "feed"
   | "sell"
   | "read_encyc"
   | "buy_fish"
   | "cook"
   | "eat"
+  | "name_egg"
+  | "fishchat_post"
   | "visit";
 
 export interface QuestDef {
@@ -272,7 +286,7 @@ export interface QuestDef {
   title: string;
   hint: string;
   trigger: QuestTrigger;
-  rewardGold: number;
+  rewardXp: number;
   rewardBait?: { id: string; n: number };
   rewardFood?: { id: string; n: number };
   rewardSalt?: number;

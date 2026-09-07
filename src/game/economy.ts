@@ -2,6 +2,7 @@ import { HOSTING_FEE_PER_TANK } from "./constants";
 import { FISH_BY_ID } from "../data/fishDefs";
 import { CONSUMABLE_BY_ID, CONSUMABLE_DEFS, baitIdFromFood, foodIdFromBait } from "../data/consumableDefs";
 import type { Quality } from "../types";
+import { stagePriceRate, ADULT_HEALTH_MAX } from "./growth";
 
 export function fishQuality(defId: string): Quality {
   return FISH_BY_ID[defId]?.quality ?? "common";
@@ -15,7 +16,7 @@ export function canFeed(fishDefId: string, foodId: string): boolean {
   return foodQ === fishQ;
 }
 
-export type FeedResult = "ate" | "refused" | "empty" | "skip";
+export type FeedResult = "ate" | "refused" | "empty" | "skip" | "full";
 
 /** 库存里找出一份该品质鱼粮；优先当前装备的那份。 */
 export function pickFoodForQuality(
@@ -59,12 +60,17 @@ export function healthDropForDay(health: number, deadCount: number): number {
   return 2 ** exp + extraDead;
 }
 
-/** 卖给鱼行：筐内按基准价；缸内按健康修正。死鱼不能卖。 */
-export function tankSellPrice(baseSell: number, health: number, dead: boolean): number | null {
+/** 卖给鱼行：按成长阶段定价（鱼苗 40%、小鱼 75%、成鱼 100%）。死鱼不能卖。 */
+export function fishSellPrice(baseSell: number, healthMax: number, dead = false): number | null {
   if (dead) return null;
-  return Math.max(Math.ceil(baseSell * 0.1), Math.round((baseSell * health) / 100));
+  return Math.max(1, Math.round(baseSell * stagePriceRate(healthMax)));
 }
 
-export function basketSellPrice(baseSell: number): number {
-  return baseSell;
+/** 缸内卖鱼，同 fishSellPrice。 */
+export function tankSellPrice(baseSell: number, healthMax: number, dead: boolean): number | null {
+  return fishSellPrice(baseSell, healthMax, dead);
+}
+
+export function basketSellPrice(baseSell: number, healthMax = ADULT_HEALTH_MAX): number {
+  return fishSellPrice(baseSell, healthMax, false) ?? baseSell;
 }

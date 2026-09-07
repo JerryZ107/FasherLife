@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useGame } from "../store/gameStore";
 import { FISHERY_BY_ID } from "../data/fisheryDefs";
 import { CONSUMABLE_BY_ID } from "../data/consumableDefs";
@@ -16,7 +16,10 @@ import { FishPortrait, GearIcon, JunkMark } from "../art/Art";
 import { FISHING_SPOTS, initialNeighbors, tickNeighbors, type NeighborState } from "./neighbors";
 import DockWorld, { panToSpotX, worldWidthPx, type Phase } from "./DockWorld";
 import { rollPersonality } from "../game/traits";
-import { QualityChip } from "../ui/chrome";
+import { ModalCloseX, QualityChip } from "../ui/chrome";
+import FishingEmojiPanel from "../ui/FishingEmojiPanel";
+import SwipeConveyorHint from "./SwipeConveyorHint";
+import { applyFightSliderRect, type FightSliderLayout } from "./fightSliderLayout";
 
 /** 挂机一轮：等鱼 + 搏斗 + 飞入，对齐 IDLE_MS_PER_CAST（10s）。 */
 const IDLE_WAIT_MS = 6400;
@@ -36,6 +39,10 @@ export default function FishingScene() {
   const equip = useGame((s) => s.equip);
   const fisheryId = useGame((s) => s.selectedFisheryId);
   const setDockGuide = useUi((s) => s.setDockGuide);
+  const guideFightIntroStep = useUi((s) => s.guideFightIntroStep);
+  const guideFightCountdown = useUi((s) => s.guideFightCountdown);
+  const setGuideFightIntroStep = useUi((s) => s.setGuideFightIntroStep);
+  const completeGuideFightIntro = useGame((s) => s.completeGuideFightIntro);
 
   const idle = save.idle;
   const idleOn = Boolean(idle);
@@ -60,9 +67,12 @@ export default function FishingScene() {
   const [pan, setPan] = useState(0);
   const [snapping, setSnapping] = useState(false);
   const [leaveGuideAfterCatch, setLeaveGuideAfterCatch] = useState(false);
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  const [playerEmote, setPlayerEmote] = useState<string | null>(null);
 
   const [castPower, setCastPower] = useState(0.55);
   const [chargePower, setChargePower] = useState(0);
+  const emoteTimerRef = useRef<number | null>(null);
   const biteTimerRef = useRef<number | null>(null);
   const reactionTimerRef = useRef<number | null>(null);
   const castTimerRef = useRef<number | null>(null);
@@ -70,6 +80,13 @@ export default function FishingScene() {
   const idleAnimRef = useRef(false);
   const storyCloseRef = useRef<(() => void) | null>(null);
   const drag = useRef<{ x: number; y: number; pan: number; moved: boolean } | null>(null);
+  const fishGuideZoneRef = useRef<HTMLDivElement>(null);
+  const playerGuideZoneRef = useRef<HTMLDivElement>(null);
+
+  const onFightSliderLayout = useCallback((layout: FightSliderLayout) => {
+    if (playerGuideZoneRef.current) applyFightSliderRect(playerGuideZoneRef.current, layout.player);
+    if (fishGuideZoneRef.current) applyFightSliderRect(fishGuideZoneRef.current, layout.fish);
+  }, []);
   const viewRef = useRef<HTMLDivElement>(null);
 
   const fishery = fisheryId ? FISHERY_BY_ID[fisheryId] : null;
@@ -89,6 +106,20 @@ export default function FishingScene() {
     phase === "bite" ||
     phase === "idle_fight";
   const biteWindowMs = biteReactMs(mods.reactionWindow);
+  const tutorialCatch =
+    save.started && !save.guideSkipped && save.questStep === "q_catch";
+  const fightIntroActive = tutorialCatch && !save.guideFightIntroDone;
+  const fightTutorialMode: "player" | "frozen" | null =
+    !fightIntroActive
+      ? null
+      : guideFightCountdown != null || guideFightIntroStep === 1 || guideFightIntroStep === 2
+        ? "frozen"
+        : guideFightIntroStep === 0
+          ? "player"
+          : null;
+  const fightGuidePaused = fightTutorialMode === "frozen" || guideFightCountdown != null;
+  const fightThumbEnabled =
+    !fightIntroActive || (guideFightIntroStep === 0 && guideFightCountdown == null);
 
   useEffect(() => {
     const caught = phase === "result" && Boolean(result && !result.escaped && result.fishId);
@@ -102,11 +133,24 @@ export default function FishingScene() {
   useEffect(() => () => setDockGuide(null), [setDockGuide]);
 
   useEffect(() => {
+    if (guideFightCountdown == null || guideFightCountdown <= 0) return;
+    const t = window.setTimeout(() => {
+      if (guideFightCountdown > 1) {
+        useUi.getState().setGuideFightCountdown(guideFightCountdown - 1);
+      } else {
+        completeGuideFightIntro();
+      }
+    }, 1000);
+    return () => window.clearTimeout(t);
+  }, [guideFightCountdown, completeGuideFightIntro]);
+
+  useEffect(() => {
     return () => {
       if (biteTimerRef.current) clearTimeout(biteTimerRef.current);
       if (reactionTimerRef.current) clearTimeout(reactionTimerRef.current);
       if (castTimerRef.current) clearTimeout(castTimerRef.current);
       if (reelTimerRef.current) clearTimeout(reelTimerRef.current);
+      if (emoteTimerRef.current) clearTimeout(emoteTimerRef.current);
     };
   }, []);
 
@@ -291,10 +335,20 @@ export default function FishingScene() {
     clearTimers();
     setResult(null);
     setFightFish(null);
+    setEmojiOpen(false);
+    setPlayerEmote(null);
+    if (emoteTimerRef.current) window.clearTimeout(emoteTimerRef.current);
     setSpot(id);
     setSnapping(true);
     setPan(panToSpotX(s.x, viewW()));
     setPhase("ready");
+  }
+
+  function pickEmote(glyph: string) {
+    setPlayerEmote(glyph);
+    setEmojiOpen(false);
+    if (emoteTimerRef.current) window.clearTimeout(emoteTimerRef.current);
+    emoteTimerRef.current = window.setTimeout(() => setPlayerEmote(null), 4000);
   }
 
   function swipePower(delta: number) {
@@ -347,8 +401,14 @@ export default function FishingScene() {
       return;
     }
     setFightFish(bite.fish);
-    setFightPersonality(rollPersonality());
+    const docileTutorial = tutorialCatch;
+    setFightPersonality(docileTutorial ? "docile" : rollPersonality());
     setProgress(30);
+    setHolding(false);
+    if (docileTutorial && !save.guideFightIntroDone) {
+      setGuideFightIntroStep(0);
+      useUi.getState().setGuideFightCountdown(null);
+    }
     setPhase("minigame");
   }
 
@@ -457,6 +517,15 @@ export default function FishingScene() {
     : phase === "bite" ? "上钩了！下滑收竿"
     : "";
 
+  const swipeHintDir =
+    idleOn || !spot || showBait
+      ? null
+      : phase === "ready" && baitCount > 0
+        ? "up"
+        : phase === "bite"
+          ? "down"
+          : null;
+
   return (
     <div
       className="fishing-root dock-mode"
@@ -520,7 +589,7 @@ export default function FishingScene() {
       {(hint && phase !== "minigame" && phase !== "result" && !showBait) ||
       (phase === "result" && result?.escaped && !idleOn) ? (
         <div className="dock-text-rail" onPointerDown={(e) => e.stopPropagation()}>
-          {hint && phase !== "minigame" && phase !== "result" && !showBait && (
+          {hint && !showBait && phase !== "result" && (
             <div className={`dock-hint ${phase === "bite" ? "accent" : ""}`}>
               {hint}
             </div>
@@ -533,6 +602,8 @@ export default function FishingScene() {
           )}
         </div>
       ) : null}
+
+      {swipeHintDir && <SwipeConveyorHint dir={swipeHintDir} />}
 
       <DockWorld
         pan={pan}
@@ -549,7 +620,17 @@ export default function FishingScene() {
         playerSex={save.lookSex}
         chargePower={chargePower}
         fisheryId={fisheryId ?? "village_pond"}
+        playerPresence={idleOn ? "idle" : "online"}
+        playerEmote={playerEmote}
       />
+
+      {spot && (
+        <FishingEmojiPanel
+          open={emojiOpen}
+          onToggle={() => setEmojiOpen((v) => !v)}
+          onPick={pickEmote}
+        />
+      )}
 
       {showBasket && (
         <div className="basket-peek" onPointerDown={(e) => e.stopPropagation()}>
@@ -574,12 +655,10 @@ export default function FishingScene() {
       {showBait && (
         <div
           className="modal-backdrop"
-          onPointerDown={(e) => {
-            e.stopPropagation();
-            setShowBait(false);
-          }}
+          onClick={() => setShowBait(false)}
         >
-          <div className="modal" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <ModalCloseX onClose={() => setShowBait(false)} />
             <div className="modal-title">换鱼饵</div>
             <p className="dim">选一种下竿用的饵。</p>
             {trip.map((id) => {
@@ -613,27 +692,47 @@ export default function FishingScene() {
               <FishPortrait id={fightFish.id} size={36} alt={fightFish.name} />
               搏斗：{fightFish.name} <QualityChip quality={fightFish.quality} />
             </span>
-            <span>{Math.round(progress)}%</span>
           </div>
-          <div className="progress-line">
-            <div style={{ width: `${progress}%` }} />
+          <div className="dock-fight-body">
+            <div className="progress-line progress-line--vertical" data-guide="fight-progress" aria-label="搏斗进度">
+              <div data-guide="fight-progress-fill" style={{ height: `${progress}%` }} />
+              <span className="progress-pct">{Math.round(progress)}%</span>
+            </div>
+            <div className="minigame-stage">
+              <div
+                ref={fishGuideZoneRef}
+                className="fight-guide-fish-zone"
+                data-guide="fight-fish-zone"
+                aria-hidden
+              />
+              <div
+                ref={playerGuideZoneRef}
+                className="fight-guide-player-zone"
+                data-guide="fight-player-zone"
+                aria-hidden
+              />
+              <FishingCanvas
+                fishDef={fightFish}
+                personality={fightPersonality}
+                mods={mods}
+                holding={holding && fightThumbEnabled}
+                paused={fightGuidePaused}
+                fightTutorial={fightTutorialMode}
+                overlay
+                onWin={onWin}
+                onLose={onLose}
+                onProgress={setProgress}
+                onSliderLayout={onFightSliderLayout}
+              />
+            </div>
           </div>
-          <div className="minigame-stage">
-            <FishingCanvas
-              fishDef={fightFish}
-              personality={fightPersonality}
-              mods={mods}
-              holding={holding}
-              overlay
-              onWin={onWin}
-              onLose={onLose}
-              onProgress={setProgress}
-            />
-          </div>
+          {guideFightCountdown != null && (
+            <div className="fight-countdown" aria-live="polite">{guideFightCountdown}</div>
+          )}
           <button
             className="primary thumb-btn"
             data-guide="fight-hold"
-            onPointerDown={(e) => { e.stopPropagation(); setHolding(true); }}
+            onPointerDown={(e) => { if (!fightThumbEnabled) return; e.stopPropagation(); setHolding(true); }}
             onPointerUp={(e) => { e.stopPropagation(); setHolding(false); }}
           >
             拇指区 · 按住上拉
@@ -642,8 +741,9 @@ export default function FishingScene() {
       )}
 
       {phase === "result" && result && !result.escaped && result.junk && (result.junk.kind === "bottle" || !idleOn) && (
-        <div className="modal-backdrop" onPointerDown={(e) => e.stopPropagation()}>
-          <div className="modal" onPointerDown={(e) => e.stopPropagation()}>
+        <div className="modal-backdrop" onClick={() => { if (idleOn) storyCloseRef.current?.(); else nextCast(); }}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <ModalCloseX onClose={() => { if (idleOn) storyCloseRef.current?.(); else nextCast(); }} />
             <div className="modal-title">{result.junk.name}</div>
             <JunkMark kind={result.junk.kind} size={88} />
             {result.junk.kind === "bottle" && result.story && (
@@ -666,65 +766,71 @@ export default function FishingScene() {
 
       {phase === "result" && result && !result.escaped && result.fishId && result.bag === "full" && !pickingReplace && !idleOn && (
         <div className="modal-backdrop" onPointerDown={(e) => e.stopPropagation()}>
-          <div className="modal" onPointerDown={(e) => e.stopPropagation()}>
-            <div className="modal-title">鱼筐满了</div>
-            <FishPortrait id={result.fishId} size={72} alt={result.fishName} />
-            <p>钓到了 {result.fishName}。要换掉筐里的一条吗？</p>
-            <button className="primary" onClick={() => setPickingReplace(true)}>替换</button>
-            <button
-              onClick={() =>
-                askConfirm({
-                  title: "确认放生",
-                  message: `确定放生「${result.fishName}」？放生后无法找回。`,
-                  confirmLabel: "放生",
-                  danger: true,
-                  onConfirm: nextCast,
-                })
-              }
-            >
-              放生这条
-            </button>
+          <div className="modal wide basket-full-modal" onClick={(e) => e.stopPropagation()}>
+            <ModalCloseX onClose={nextCast} />
+            <div className="modal-scroll">
+              <div className="modal-title">鱼筐满了</div>
+              <FishPortrait id={result.fishId} size={72} alt={result.fishName} />
+              <p>钓到了 {result.fishName}。要换掉筐里的一条吗？</p>
+              <button className="primary" onClick={() => setPickingReplace(true)}>替换</button>
+              <button
+                onClick={() =>
+                  askConfirm({
+                    title: "确认放生",
+                    message: `确定放生「${result.fishName}」？放生后无法找回。`,
+                    confirmLabel: "放生",
+                    danger: true,
+                    onConfirm: nextCast,
+                  })
+                }
+              >
+                放生这条
+              </button>
+            </div>
           </div>
         </div>
       )}
 
       {phase === "result" && result && !result.escaped && result.fishId && result.bag === "full" && pickingReplace && !idleOn && (
         <div className="modal-backdrop" onPointerDown={(e) => e.stopPropagation()}>
-          <div className="modal" onPointerDown={(e) => e.stopPropagation()}>
-            <div className="modal-title">选一条换掉</div>
-            <p className="dim">换上 {result.fishName}。超重的不能换。</p>
-            {save.basket.map((b) => {
-              const def = FISH_BY_ID[b.defId];
-              const next = FISH_BY_ID[result.fishId ?? ""];
-              if (!def || !next) return null;
-              const ok = replaceWouldFit(save, b.uid, next);
-              return (
-                <button
-                  key={b.uid}
-                  disabled={!ok}
-                  onClick={() => {
-                    if (replaceBasketCatch(b.uid, next, fightPersonality)) {
-                      setResult({ ...result, bag: "replaced" });
-                      setPickingReplace(false);
-                    }
-                  }}
-                >
-                  <span className="row" style={{ alignItems: "center" }}>
-                    <FishPortrait id={def.id} size={36} alt={def.name} />
-                    {def.name} <QualityChip quality={def.quality} />
-                    {ok ? "" : " · 超重"}
-                  </span>
-                </button>
-              );
-            })}
-            <button onClick={() => setPickingReplace(false)}>返回</button>
+          <div className="modal wide basket-full-modal" onClick={(e) => e.stopPropagation()}>
+            <ModalCloseX onClose={() => setPickingReplace(false)} />
+            <div className="modal-scroll">
+              <div className="modal-title">选一条换掉</div>
+              <p className="dim">换上 {result.fishName}。超重的不能换。</p>
+              {save.basket.map((b) => {
+                const def = FISH_BY_ID[b.defId];
+                const next = FISH_BY_ID[result.fishId ?? ""];
+                if (!def || !next) return null;
+                const ok = replaceWouldFit(save, b.uid, next);
+                return (
+                  <button
+                    key={b.uid}
+                    disabled={!ok}
+                    onClick={() => {
+                      if (replaceBasketCatch(b.uid, next, fightPersonality)) {
+                        setResult({ ...result, bag: "replaced" });
+                        setPickingReplace(false);
+                      }
+                    }}
+                  >
+                    <span className="row" style={{ alignItems: "center" }}>
+                      <FishPortrait id={def.id} size={36} alt={def.name} />
+                      {def.name} <QualityChip quality={def.quality} />
+                      {ok ? "" : " · 超重"}
+                    </span>
+                  </button>
+                );
+              })}
+              <button onClick={() => setPickingReplace(false)}>返回</button>
+            </div>
           </div>
         </div>
       )}
 
       {phase === "result" && result && !result.escaped && result.fishId && result.bag !== "full" && !idleOn && (
         <div className="modal-backdrop" onPointerDown={(e) => e.stopPropagation()}>
-          <div className="stage-card catch-card" onPointerDown={(e) => e.stopPropagation()} onClick={dismissCatchPopup}>
+          <div className="stage-card catch-card" data-guide="catch-card" onPointerDown={(e) => e.stopPropagation()} onClick={dismissCatchPopup}>
             <FishPortrait id={result.fishId} size={120} alt={result.fishName} />
             <strong>{result.fishName}</strong>
             <div className="catch-into">

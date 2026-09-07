@@ -10,9 +10,10 @@ export const PEARL_TO_GOLD = 100;
 /** 托管日费：每口缸 100 金/天。 */
 export const HOSTING_FEE_PER_TANK = 100;
 
-/** 月卡：30 珍珠，每日 300 金币，持续 30 游戏天；可叠买。 */
+/** 月卡：30 珍珠，每日 300 金币 + 1 珍珠，持续 30 游戏天；可叠买。 */
 export const MONTHLY_CARD_PEARL = 30;
 export const MONTHLY_CARD_DAILY_GOLD = 300;
+export const MONTHLY_CARD_DAILY_PEARL = 1;
 export const MONTHLY_CARD_DAYS = 30;
 
 /** 6 元新人礼包。新人前期 7 游戏天可买（ADR-003）。 */
@@ -21,3 +22,6 @@ export const NEWBIE_PACK_DAYS = 7;
 
 /** 欧气上限（参观榜单叠加）。 */
 export const LUCK_CAP = 8;
+
+/** 商城鱼饵每袋数量。 */
+export const BAIT_PACK_SIZE = 10;

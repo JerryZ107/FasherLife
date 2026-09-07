@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useGame } from "../store/gameStore";
 import { MAIL_BY_ID, mailHasReward, type MailDef } from "../data/mailDefs";
 import { CONSUMABLE_BY_ID, foodNameOf } from "../data/consumableDefs";
-import { mailExpired, visibleMails } from "../game/mail";
+import { mailExpired, visibleMails, formatMailReceivedAt, mailReceivedAt } from "../game/mail";
 import { EmptyHint, GoldAmt, Page, PageBody, PageHead, PearlAmt } from "../ui/chrome";
 import { IcoMail } from "../ui/marks";
 import type { MailItem } from "../save/saveSchema";
@@ -16,6 +16,11 @@ export default function MailScene() {
   const deleteMail = useGame((s) => s.deleteMail);
   const list = useMemo(() => visibleMails(save), [save]);
   const [picked, setPicked] = useState<string | null>(null);
+  const activeMail = useMemo(
+    () => (picked ? list.find((m) => m.uid === picked) : undefined),
+    [list, picked],
+  );
+  const activeDef = activeMail ? MAIL_BY_ID[activeMail.defId] : undefined;
   const pending = list.some((m) => {
     const d = MAIL_BY_ID[m.defId];
     return d && mailHasReward(d) && !m.claimed;
@@ -45,26 +50,32 @@ export default function MailScene() {
               <button
                 className={`panel mail-row ${on ? "panel-active" : ""} ${unread ? "unread" : "read"}`}
                 onClick={() => {
-                  setPicked(on ? null : m.uid);
-                  readMail(m.uid);
+                  setPicked((prev) => {
+                    const next = prev === m.uid ? null : m.uid;
+                    if (next) readMail(m.uid);
+                    return next;
+                  });
                 }}
               >
                 <span className={`mail-dot ${unread ? "is-on" : ""}`} />
                 <IcoMail size={28} />
                 <span className="mail-copy">
                   <strong>{d.title}</strong>
-                  <span className="dim">{d.sender} · 第 {m.receivedDay} 天</span>
+                  <span className="dim">
+                    {d.sender} · {formatMailReceivedAt(mailReceivedAt(m, save))}
+                  </span>
                 </span>
                 {pendingReward ? <span className="chip ok">附件</span> : null}
               </button>
-              {on && (
+              {on && activeMail && activeDef && activeMail.uid === m.uid && (
                 <MailLetter
-                  mail={m}
-                  def={d}
+                  mail={activeMail}
+                  def={activeDef}
                   gameDay={save.gameDay}
-                  onClaim={() => claimMail(m.uid)}
+                  receivedAtLabel={formatMailReceivedAt(mailReceivedAt(activeMail, save))}
+                  onClaim={() => claimMail(activeMail.uid)}
                   onDelete={() => {
-                    if (deleteMail(m.uid)) setPicked(null);
+                    if (deleteMail(activeMail.uid)) setPicked(null);
                   }}
                 />
               )}
@@ -80,12 +91,14 @@ function MailLetter({
   mail,
   def,
   gameDay,
+  receivedAtLabel,
   onClaim,
   onDelete,
 }: {
   mail: MailItem;
   def: MailDef;
   gameDay: number;
+  receivedAtLabel: string;
   onClaim: () => void;
   onDelete: () => void;
 }) {
@@ -95,7 +108,7 @@ function MailLetter({
     <div className="mail-letter">
       <div className="mail-letter-head">
         <strong>{def.title}</strong>
-        <span className="dim">发件人：{def.sender}</span>
+        <span className="dim">发件人：{def.sender} · {receivedAtLabel}</span>
       </div>
       <p className="mail-letter-body">{def.body}</p>
       {hasReward && (

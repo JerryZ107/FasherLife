@@ -5,7 +5,8 @@ import { livingFishInTank } from "../game/slotAssign";
 import { occupancy, slotIndexOfTank, tankById } from "../game/tanks";
 import { fishSex } from "../game/pairing";
 import { FishPortrait } from "../art/Art";
-import { ModalSheet, QualityChip } from "../ui/chrome";
+import { ModalSheet, QualityChip, GrowthStageChip } from "../ui/chrome";
+import { fishHealthMax } from "../game/growth";
 import { SexIcon } from "../ui/marks";
 import { useUi } from "../store/uiStore";
 
@@ -57,7 +58,7 @@ export default function SlotOverflowModal() {
             >
               <FishPortrait id={def.id} size={48} alt={def.name} />
               <span className="fish-pick-meta">
-                <strong>{def.name} <SexIcon sex={fishSex(f)} /></strong>
+                <strong>{def.name} <SexIcon sex={fishSex(f)} /> <GrowthStageChip healthMax={fishHealthMax(f)} /></strong>
                 <QualityChip quality={def.quality} />
               </span>
               <span className="dim">{on ? "已选" : "点选"}</span>

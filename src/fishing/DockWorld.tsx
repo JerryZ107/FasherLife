@@ -1,8 +1,9 @@
 import PersonView, { type PersonMotion } from "../art/PersonView";
+import { StickerGlyph } from "../ui/StickerGlyph";
 import { FISH_BY_ID } from "../data/fishDefs";
 import { fishWeightKg } from "../game/weight";
 import { FishPortrait, GearIcon, JunkMark } from "../art/Art";
-import { FISHING_SPOTS, type NeighborState, type NeighborStatus } from "./neighbors";
+import { FISHING_SPOTS, type NeighborPresence, type NeighborState, type NeighborStatus } from "./neighbors";
 import DockBackdrop from "./DockBackdrop";
 import type { FishDef, Sex } from "../types";
 import type { JunkKind } from "../data/junkDefs";
@@ -36,6 +37,8 @@ type Props = {
   playerSex?: Sex;
   chargePower?: number;
   fisheryId?: string;
+  playerPresence?: NeighborPresence;
+  playerEmote?: string | null;
 };
 
 const SPARKS = [8, 15, 23, 32, 41, 50, 59, 68, 77, 86, 94];
@@ -55,11 +58,19 @@ export default function DockWorld({
   playerSex = "male",
   chargePower = 0,
   fisheryId = "village_pond",
+  playerPresence = "online",
+  playerEmote = null,
 }: Props) {
   const bite = phase === "bite" || phase === "minigame" || phase === "idle_fight";
   const stream = fisheryId === "clear_stream";
   return (
     <div className="dock-view">
+      <svg className="dock-sun-fixed" viewBox="0 0 120 120" aria-hidden>
+        <circle cx="60" cy="60" r="54" fill="#ffe08a" opacity="0.28" />
+        <circle cx="60" cy="60" r="34" fill="#ffe9a8" />
+        <circle cx="60" cy="60" r="24" fill="#fff6c8" />
+        <circle cx="52" cy="54" r="8" fill="#fff" opacity="0.35" />
+      </svg>
       <div
         className={`dock-world ${snapping ? "is-snap" : ""} is-${phase}${bite ? " is-hotwater" : ""}${stream ? " is-stream" : " is-pond"}`}
         style={{ width: `${WORLD_VW}%`, transform: `translateX(${-pan}px)` }}
@@ -92,9 +103,11 @@ export default function DockWorld({
                 name={npc.name}
                 outfitId={npc.outfitId}
                 status={npc.status}
+                presence={npc.presence}
                 fishId={npc.status === "caught" ? npc.fishId : null}
                 sex={npc.sex}
                 castPower={0.52}
+                emote={npc.emote}
               />
             );
           }
@@ -112,12 +125,14 @@ export default function DockWorld({
                 name="你"
                 you
                 status={playerStatus(phase, playerEscaped)}
+                presence={playerPresence}
                 fishId={playerFishId}
                 junkKind={playerJunkKind}
                 outfitId={playerOutfitId}
                 sex={playerSex}
                 castPower={castPower}
                 chargePower={chargePower}
+                emote={playerEmote}
               />
             );
           }
@@ -201,6 +216,12 @@ function catchJunkStyle(): CSSProperties {
   } as CSSProperties;
 }
 
+function presenceLabel(p: NeighborPresence): string {
+  if (p === "idle") return "挂机";
+  if (p === "offline") return "离线";
+  return "在线";
+}
+
 function Angler({
   x,
   name,
@@ -208,10 +229,12 @@ function Angler({
   sex,
   you,
   status,
+  presence = "online",
   fishId,
   junkKind = null,
   castPower = 0.55,
   chargePower = 0,
+  emote = null,
 }: {
   x: number;
   name: string;
@@ -219,10 +242,12 @@ function Angler({
   sex: Sex;
   you?: boolean;
   status: NeighborStatus | "casting" | "bite" | "ready" | "reeling";
+  presence?: NeighborPresence;
   fishId: string | null;
   junkKind?: JunkKind | null;
   castPower?: number;
   chargePower?: number;
+  emote?: string | null;
 }) {
   const fish = fishId ? FISH_BY_ID[fishId] : null;
   const showLanded = Boolean((fish || junkKind) && status === "caught");
@@ -243,10 +268,18 @@ function Angler({
   } as CSSProperties;
   return (
     <div className={`angler ${you ? "is-you" : ""} is-${status}${charging ? " is-charging" : ""}`} style={style}>
-      <div className="angler-name">{name}</div>
+      <div className="angler-name">
+        <span>{name}</span>
+        <span className={`angler-presence is-${presence}`}>{presenceLabel(presence)}</span>
+      </div>
       {status === "bite" && (
         <div className="angler-exclaim" aria-hidden>
           !
+        </div>
+      )}
+      {emote && (
+        <div className="angler-sticker" aria-hidden>
+          <StickerGlyph id={emote === "..." ? "dots" : "other"} glyph={emote} />
         </div>
       )}
       {showLine && (

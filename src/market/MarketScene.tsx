@@ -3,6 +3,8 @@ import { useGame } from "../store/gameStore";
 import { FISH_BY_ID } from "../data/fishDefs";
 import { QUALITY_LABEL, QUALITY_ORDER, type Quality } from "../types";
 import { qualitySortRank } from "../game/weight";
+import { basketSellPrice } from "../game/economy";
+import { ADULT_HEALTH_MAX } from "../game/growth";
 import { FishPortrait } from "../art/Art";
 import { EmptyHint, Page, PageHead, QualityChip } from "../ui/chrome";
 import { askConfirm, useUi } from "../store/uiStore";
@@ -74,11 +76,11 @@ export default function MarketScene() {
         <div className="split-left">
           {(["buy", "sell", "list"] as Tab[]).map((t) => (
             <button key={t} className={tab === t ? "tab is-on" : "tab"} data-guide={t === "buy" ? "market-tab-buy" : undefined} onClick={() => setTab(t)}>
-              {t === "list" ? "挂售" : t === "sell" ? "售卖" : "购买"}
+              {t === "list" ? "挂售" : t === "sell" ? "销售" : "购买"}
             </button>
           ))}
           <p className="dim" style={{ fontSize: 11, padding: "0 4px" }}>
-            {tab === "list" ? "正在挂出的鱼" : tab === "sell" ? "只卖鱼筐里的鱼" : "鱼行和其他钓友"}
+            {tab === "list" ? "正在挂出的鱼" : tab === "sell" ? "只销售鱼筐里的鱼" : "鱼行和其他钓友"}
           </p>
         </div>
         <div className="split-right">
@@ -138,8 +140,10 @@ export default function MarketScene() {
 
             {tab === "sell" && (
               <>
-                {basketFish.length === 0 && <EmptyHint>筐里没有可售卖的鱼</EmptyHint>}
-                {basketFish.map((f, i) => (
+                {basketFish.length === 0 && <EmptyHint>筐里没有可销售的鱼</EmptyHint>}
+                {basketFish.map((f, i) => {
+                  const sellPrice = basketSellPrice(f.def.sellPrice, f.healthMax ?? ADULT_HEALTH_MAX);
+                  return (
                   <div className="panel market-row" key={f.uid}>
                     <FishPortrait id={f.def.id} size={40} alt={f.def.name} />
                     <div className="market-meta">
@@ -152,18 +156,19 @@ export default function MarketScene() {
                       onClick={() => {
                         markGuideSellPrompted();
                         askConfirm({
-                          title: "确认售卖",
-                          message: `确定把「${f.def.name}」卖给鱼行，获得 ${f.def.sellPrice} 金？卖出后无法找回。`,
-                          confirmLabel: "售卖",
+                          title: "确认销售",
+                          message: `确定把「${f.def.name}」卖给鱼行，获得 ${sellPrice} 金？卖出后无法找回。`,
+                          confirmLabel: "销售",
                           onConfirm: () => sellToMarket(f.uid),
                           onCancel: () => markGuideSellPrompted(),
                         });
                       }}
                     >
-                      售卖 {f.def.sellPrice}金
+                      销售 {sellPrice}金
                     </button>
                   </div>
-                ))}
+                );
+                })}
               </>
             )}
 

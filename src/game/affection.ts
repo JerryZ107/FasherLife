@@ -52,7 +52,7 @@ export function tryPetFish(
 }
 
 export function canNameFish(fish: { affection?: number; dead?: boolean }): boolean {
-  return !fish.dead && (fish.affection ?? 0) >= AFFECTION_MAX;
+  return !fish.dead;
 }
 
 /** 亲密度每 1 点 +1% 触发温顺点击反馈；0 时不触发。 */
