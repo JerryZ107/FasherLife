@@ -279,6 +279,24 @@ export type RemoteSave =
   | { ok: true; save: unknown }
   | { ok: false; error: string };
 
+const OFFLINE_CABINET = "连不上存档柜。先开着游戏服务再试。";
+
+/** 静态站/无 Vite 插件时 /api 会返回非 JSON，当作离线。 */
+export function isCabinetOfflineError(msg: string): boolean {
+  return msg.includes("连不上存档柜") || msg.includes("存档柜打不开");
+}
+
+async function parseApiBody(r: Response): Promise<Record<string, unknown> | null> {
+  const ct = r.headers.get("content-type") || "";
+  if (!ct.includes("application/json")) return null;
+  try {
+    const d = await r.json();
+    return d && typeof d === "object" ? (d as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function remoteLogin(account: string, hash: string): Promise<RemoteSave> {
   try {
     const r = await fetch("/api/login", {
@@ -286,7 +304,8 @@ export async function remoteLogin(account: string, hash: string): Promise<Remote
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ account, hash }),
     });
-    const d = (await r.json().catch(() => ({}))) as { error?: unknown; save?: unknown };
+    const d = await parseApiBody(r);
+    if (!d) return { ok: false, error: OFFLINE_CABINET };
     if (!r.ok) {
       return {
         ok: false,
@@ -302,7 +321,7 @@ export async function remoteLogin(account: string, hash: string): Promise<Remote
     }
     return { ok: true, save: d.save };
   } catch {
-    return { ok: false, error: "连不上存档柜。先开着游戏服务再试。" };
+    return { ok: false, error: OFFLINE_CABINET };
   }
 }
 
@@ -313,7 +332,8 @@ export async function remoteRegister(account: string, hash: string, save: unknow
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ account, hash, save }),
     });
-    const d = (await r.json().catch(() => ({}))) as { error?: unknown; save?: unknown };
+    const d = await parseApiBody(r);
+    if (!d) return { ok: false, error: OFFLINE_CABINET };
     if (!r.ok) {
       return {
         ok: false,
@@ -327,7 +347,7 @@ export async function remoteRegister(account: string, hash: string, save: unknow
     }
     return { ok: true, save: d.save };
   } catch {
-    return { ok: false, error: "连不上存档柜。先开着游戏服务再试。" };
+    return { ok: false, error: OFFLINE_CABINET };
   }
 }
 

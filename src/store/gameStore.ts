@@ -90,9 +90,11 @@ import { rollTraits } from "../game/traits";
 import {
   accountExists,
   clearLegacySave,
+  createAccountSlot,
   getSessionAccount,
   getSessionHash,
   hashPassword,
+  isCabinetOfflineError,
   peekLegacySaveRaw,
   readAccountSaveRaw,
   remoteLogin,
@@ -1050,12 +1052,25 @@ export const useGame = create<GameStore>((set, get) => ({
         if (opened.error.includes("已经") || opened.error.includes("有人用")) {
           return "这个账号已经有人用了，换一个吧";
         }
-        return opened.error;
+        if (isCabinetOfflineError(opened.error)) {
+          const localErr = createAccountSlot(name, hash, save);
+          if (localErr) {
+            return localErr.includes("注册") ? "这个账号已经有人用了，换一个吧" : localErr;
+          }
+        } else {
+          return opened.error;
+        }
       }
       if (leftover) clearLegacySave();
       writeRememberedAuth(remember ? { account: name, password } : null);
       enterAccount(set, get, name, hash, save);
-      toast(leftover ? "已接上你之前的存档" : `账号 ${name} 已注册，欢迎`);
+      toast(
+        leftover
+          ? "已接上你之前的存档"
+          : !opened.ok
+            ? `账号 ${name} 已注册（本机存档）`
+            : `账号 ${name} 已注册，欢迎`,
+      );
       return null;
     } catch (e) {
       return e instanceof Error ? e.message : "注册失败，请换浏览器再试";
