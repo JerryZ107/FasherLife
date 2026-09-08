@@ -1,22 +1,29 @@
 import { Texture } from "pixi.js";
 
+/** GitHub Pages 等子路径部署时加 base，本地仍是 `/`。 */
+const BASE = import.meta.env.BASE_URL;
+
+function artUrl(file: string): string {
+  return `${BASE}art/${file}`;
+}
+
 export const ART = {
-  bgLogin: "/art/bg_login.png",
-  bgTank: "/art/bg_tank.png",
-  bgMap: "/art/bg_map.png",
-  bgFishing: "/art/bg_fishing.png",
-  char: "/art/char_fisher.png",
-  fish: (id: string) => `/art/fish_${id}.png`,
+  bgLogin: artUrl("bg_login.png"),
+  bgTank: artUrl("bg_tank.png"),
+  bgMap: artUrl("bg_map.png"),
+  bgFishing: artUrl("bg_fishing.png"),
+  char: artUrl("char_fisher.png"),
+  fish: (id: string) => artUrl(`fish_${id}.png`),
   icon: {
-    rod: "/art/icon_rod.png",
-    bait: "/art/icon_bait.png",
-    stool: "/art/icon_stool.png",
-    basket: "/art/icon_basket.png",
-    food: "/art/icon_food.png",
-    luck: "/art/icon_luck.png",
+    rod: artUrl("icon_rod.png"),
+    bait: artUrl("icon_bait.png"),
+    stool: artUrl("icon_stool.png"),
+    basket: artUrl("icon_basket.png"),
+    food: artUrl("icon_food.png"),
+    luck: artUrl("icon_luck.png"),
   },
-  fxRage: "/art/fx_rage.png",
-  fishSliderDoodle: "/art/fish_slider_doodle.png",
+  fxRage: artUrl("fx_rage.png"),
+  fishSliderDoodle: artUrl("fish_slider_doodle.png"),
 } as const;
 
 export type GearIconKind = keyof typeof ART.icon;
